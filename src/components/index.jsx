@@ -3,7 +3,7 @@
  * font/space comes from `theme` (2nd arg, from render context). Swap the theme → the whole set re-skins.
  * Intrinsics used (from the runtime): <box>/<row>/<section>/<h1..3>/<text>/<html>/<img>, props = sx shorthand.
  */
-import { navBar, browserMock, chatMock, lineChart, donut } from '../../../.claude/skills/elementor-ultra/lib/kit-components.mjs';
+import { navBar, browserMock, chatMock, lineChart, donut } from '../kit/kit-components.mjs';
 
 export const Page = ({ children }) => children; // sections stay top-level (Fragment-like)
 

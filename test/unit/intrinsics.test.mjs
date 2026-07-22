@@ -7,8 +7,8 @@ import assert from 'node:assert/strict';
 import { h, render, renderPage, Fragment, useTheme, useCtx } from '../../src/runtime.mjs';
 import { defineTheme } from '../../src/theme.mjs';
 import { resetIds, deskProps, styleOf, customCssOf, textOf, classRefs, findNode, byWidget } from '../helpers.mjs';
-import { S, C, SZ, DIM, HUG } from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
-import { txt as ktxt } from '../../../.claude/skills/elementor-ultra/lib/kit-components.mjs';
+import { S, C, SZ, DIM, HUG } from '../../src/kit/kit.mjs';
+import { txt as ktxt } from '../../src/kit/kit-components.mjs';
 
 beforeEach(() => resetIds());
 
@@ -211,7 +211,7 @@ test('kit-node passthrough: a raw kit node renders unchanged (escape hatch)', ()
 test('MIXING: JSX vnodes embedded in a kit component\'s children are RENDERED, at any depth', async () => {
   // the section({children:[<row/>]}) pattern — used to leak {$$v} vnodes that 422 at the
   // live PHP validator (R1). The runtime now renders embedded vnodes recursively.
-  const { section } = await import('../../../.claude/skills/elementor-ultra/lib/kit-components.mjs');
+  const { section } = await import('../../src/kit/kit-components.mjs');
   const kit = section({ header: { title: 'Mixed' }, children: [
     h('row', { gap: 12, pad: 0 }, h('text', {}, 'deep jsx')),
   ] });
@@ -222,7 +222,7 @@ test('MIXING: JSX vnodes embedded in a kit component\'s children are RENDERED, a
 });
 
 test('MIXING: assertTree names a leaked vnode clearly (belt-and-suspenders)', async () => {
-  const { assertTree } = await import('../../../.claude/skills/elementor-ultra/lib/kit.mjs');
+  const { assertTree } = await import('../../src/kit/kit.mjs');
   const leaked = { id: 'k1', elType: 'e-flexbox', settings: { classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [h('row', {}, 'x')] };
   assert.throws(() => assertTree([leaked]), /unrendered JSX vnode <row>/);
 });

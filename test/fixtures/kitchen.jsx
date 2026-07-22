@@ -6,11 +6,11 @@ import { defineTheme } from '../../src/theme.mjs';
 import {
   navBar, section, card, cardGrid, bento, stat, step, chip, logoStrip, testimonial,
   footer, ctaBand, lineChart, donut, barChart, browserMock, chatMock, styled, sx,
-} from '../../../.claude/skills/elementor-ultra/lib/kit-components.mjs';
+} from '../../src/kit/kit-components.mjs';
 import {
   hero, heading, para, button, hover, css, clone, SZ, S,
   divider, youtube, video, tabs,
-} from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+} from '../../src/kit/kit.mjs';
 
 const theme = defineTheme({
   name: 'exjsx-kitchen',

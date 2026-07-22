@@ -4,8 +4,8 @@
  *   <Raw>{node}</Raw>        → verbatim kit-node passthrough (for widget types with no JSX mapping)
  * Both return plain kit nodes, so render() passes them straight through.
  */
-import { button } from '../../.claude/skills/elementor-ultra/lib/kit.mjs';
-import { sx } from '../../.claude/skills/elementor-ultra/lib/kit-components.mjs';
+import { button } from './kit/kit.mjs';
+import { sx } from './kit/kit-components.mjs';
 
 /** e-button. Tolerant href (kit's button() throws on '#'/empty; decompiled links may be bare). */
 export const Button = ({ text = '', href, cls, gcls, ...style } = {}) => {

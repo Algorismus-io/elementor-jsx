@@ -5,7 +5,7 @@
  */
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { assertTree, node, clone, S, N, SZ, P0, col, row, heading } from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+import { assertTree, node, clone, S, N, SZ, P0, col, row, heading } from '../../src/kit/kit.mjs';
 import { resetIds } from '../helpers.mjs';
 import { h, render, renderPage } from '../../src/runtime.mjs';
 

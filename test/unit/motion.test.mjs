@@ -7,7 +7,7 @@
  */
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { interaction, interact, heading, col, P0 } from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+import { interaction, interact, heading, col, P0 } from '../../src/kit/kit.mjs';
 import { h, render } from '../../src/runtime.mjs';
 import { compileSite } from '../../src/compile.mjs';
 import { defineSite } from '../../src/site.mjs';

@@ -8,8 +8,8 @@
  *   - string    → an intrinsic: 'box'|'row'|'col'|'section'|'h1..h3'|'text'|'html'|'img' → kit builder.
  * A returned kit node (has .elType) passes straight through — the escape hatch to raw kit.
  */
-import { box, sx, styled, h2 as kh2, h3 as kh3, txt as ktxt } from '../../.claude/skills/elementor-ultra/lib/kit-components.mjs';
-import { heading, para, image, imageUrl, node, LINK, interact } from '../../.claude/skills/elementor-ultra/lib/kit.mjs';
+import { box, sx, styled, h2 as kh2, h3 as kh3, txt as ktxt } from './kit/kit-components.mjs';
+import { heading, para, image, imageUrl, node, LINK, interact } from './kit/kit.mjs';
 
 export const Fragment = Symbol('exjsx.Fragment');
 

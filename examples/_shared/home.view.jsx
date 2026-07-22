@@ -1,5 +1,5 @@
 import { Page, Section, Card, Bento, Stat, CTA, Footer, Nav } from '../../src/components/index.jsx';
-import { fontLoader } from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+import { fontLoader } from '../../src/kit/kit.mjs';
 
 const SERVICES = [
   ['Web Design', 'Conversion-first sites that look the part and load fast.', 6],

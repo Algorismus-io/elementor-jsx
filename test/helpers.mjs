@@ -2,7 +2,7 @@
  * helpers.mjs — shared assertions/finders for the parity-engine test suite.
  * Everything here is offline; integration helpers live in integration/harness.mjs.
  */
-import { resetIds } from '../../.claude/skills/elementor-ultra/lib/kit.mjs';
+import { resetIds } from '../src/kit/kit.mjs';
 
 /** Reset the kit id registry between tests so builds are deterministic and isolated. */
 export { resetIds };

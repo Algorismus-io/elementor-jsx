@@ -9,8 +9,8 @@ import {
   box, styled, bindClass, h2, h3, txt, eyebrow, accentHeading,
   sectionHeader, section, card, bento, cardGrid, stat, step, chip, logoStrip, testimonial,
   footer, ctaBand, navBar, browserMock, barChart, lineChart, donut, chatMock, CInc,
-} from '../../../.claude/skills/elementor-ultra/lib/kit-components.mjs';
-import { assertTree } from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+} from '../../src/kit/kit-components.mjs';
+import { assertTree } from '../../src/kit/kit.mjs';
 import { compileSite } from '../../src/compile.mjs';
 import { defineSite } from '../../src/site.mjs';
 import { resetIds, allNodes, deskProps, customCssOf, textOf, classRefs } from '../helpers.mjs';
@@ -61,7 +61,7 @@ test('bindClass: attaches g- refs FIRST, auto-prefixes bare names, preserves loc
 });
 
 test('CInc: the re-export bag aliases the kit constructors exactly', async () => {
-  const kit = await import('../../../.claude/skills/elementor-ultra/lib/kit.mjs');
+  const kit = await import('../../src/kit/kit.mjs');
   for (const k of ['S', 'C', 'N', 'B', 'SZ', 'DIM', 'M', 'RAD', 'BG', 'GRAD', 'SHADOW', 'HTML', 'LINK']) {
     assert.equal(CInc[k], kit[k], `CInc.${k} === kit.${k}`);
   }

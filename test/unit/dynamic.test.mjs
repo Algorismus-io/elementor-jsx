@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import {
   DYN, dyn, isDyn, IMG_DYN, heading, para, button, image, LINK, S,
   loopGrid, assertTree,
-} from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+} from '../../src/kit/kit.mjs';
 import { h, render } from '../../src/runtime.mjs';
 import { compileSite } from '../../src/compile.mjs';
 import { defineSite } from '../../src/site.mjs';

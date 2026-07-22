@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import {
   divider, youtube, video, tabs, VIDEO_URL, VIDEO_ID,
   para, heading, assertTree, S, N, B, SZ, BG, P0, sect, IMG_ID,
-} from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+} from '../../src/kit/kit.mjs';
 import { compileSite } from '../../src/compile.mjs';
 import { defineSite } from '../../src/site.mjs';
 import { h } from '../../src/runtime.mjs';

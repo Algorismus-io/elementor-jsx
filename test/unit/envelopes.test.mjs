@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import {
   S, C, N, B, SZ, DIM, M, P0, RAD, RADT, RADB, BG, GRAD, SHADOW,
   HUG, AUTO, HTML, LINK, CLS, IMG_ID, SVG_ID, CUSTOM_CSS,
-} from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+} from '../../src/kit/kit.mjs';
 
 test('scalars: S/C/N/B', () => {
   assert.deepEqual(S('x'), { $$type: 'string', value: 'x' });

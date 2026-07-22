@@ -5,8 +5,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sx, FLEX } from '../../../.claude/skills/elementor-ultra/lib/kit-components.mjs';
-import { S, C, N, SZ, DIM, M, RAD, BG, GRAD, SHADOW, HUG, AUTO } from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+import { sx, FLEX } from '../../src/kit/kit-components.mjs';
+import { S, C, N, SZ, DIM, M, RAD, BG, GRAD, SHADOW, HUG, AUTO } from '../../src/kit/kit.mjs';
 
 const VAR_REF = { $$type: 'global-color-variable', value: 'e-gv-abc1234', __lit: '#123456' };
 const FONT_REF = { $$type: 'global-font-variable', value: 'e-gv-def5678' };

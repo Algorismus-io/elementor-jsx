@@ -10,7 +10,7 @@ import {
   S, C, SZ, P0, HUG, IMG_URL,
   fx, col, row, grid, hugRow, hugCol, bar, sect, hero, abs, archConvex, archConcave,
   heading, para, button, image, imageUrl, textLink, fontLoader, faIcon, normalizeFaValue, svgIcon, iconChip,
-} from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+} from '../../src/kit/kit.mjs';
 import { resetIds, styleOf, deskProps, customCssOf, classRefs, allNodes } from '../helpers.mjs';
 
 beforeEach(() => resetIds());

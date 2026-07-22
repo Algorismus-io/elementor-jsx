@@ -4,7 +4,7 @@
  * 22 tokens is not 22 REST calls. Components read tokens via useTheme(); tokens resolve to a live
  * `var(--…)` reference (editable in the Class Manager) or a literal (config).
  */
-import { S, C, SZ, BG, RAD, DIM } from '../../.claude/skills/elementor-ultra/lib/kit.mjs';
+import { S, C, SZ, BG, RAD, DIM } from './kit/kit.mjs';
 
 /* deterministic id from a label (stable across builds → idempotent re-deploys, no Date/random) */
 const hash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(16).slice(0, 7); };

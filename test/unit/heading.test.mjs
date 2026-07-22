@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { h, render, renderPage } from '../../src/runtime.mjs';
 import { defineTheme } from '../../src/theme.mjs';
 import { resetIds, styleOf, deskProps, variantProps, customCssOf, textOf, classRefs } from '../helpers.mjs';
-import { S, C, SZ } from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+import { S, C, SZ } from '../../src/kit/kit.mjs';
 
 beforeEach(() => resetIds());
 
@@ -168,7 +168,7 @@ test('heading: literal-mode theme token → plain hex', () => {
 
 /* ── combined torture: everything at once, then structurally valid ── */
 test('heading: ALL features simultaneously still yields one coherent widget', async () => {
-  const { assertTree } = await import('../../../.claude/skills/elementor-ultra/lib/kit.mjs');
+  const { assertTree } = await import('../../src/kit/kit.mjs');
   const t = defineTheme({ name: 'tor', color: { brand: '#E01118' } });
   const n = render(h('heading', {
     tag: 'h1', color: t.color.brand, size: 64, weight: 900, font: 'Archivo', ta: 'center',

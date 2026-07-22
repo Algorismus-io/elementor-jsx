@@ -1,6 +1,6 @@
 /** compile.mjs — pure, offline: a site definition → a deployable bundle (trees + kit + fonts). NO MCP. */
 import { renderPage } from './runtime.mjs';
-import { assertTree } from '../../.claude/skills/elementor-ultra/lib/kit.mjs';
+import { assertTree } from './kit/kit.mjs';
 import { extractClasses, mergeClasses } from './classes.mjs';
 
 /**

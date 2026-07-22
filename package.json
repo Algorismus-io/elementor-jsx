@@ -1,8 +1,8 @@
 {
   "name": "elementor-jsx",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
-  "description": "A React-level, file-first framework that compiles JSX + a theme into an Elementor V4 site bundle and deploys it in one shot (no per-token round-trips).",
+  "description": "React-level JSX -> Elementor V4 compiler + one-shot deployer. Full catalog parity (atomic elements, forms, theme parts, dynamic tags, loops, interactions, SEO), certified on Elementor 4.1.4/4.2.0 by a 396-test suite.",
   "bin": {
     "exjsx": "./src/cli.mjs"
   },
@@ -20,5 +20,23 @@
   "devDependencies": {
     "pixelmatch": "^7.2.0",
     "pngjs": "^7.0.0"
-  }
+  },
+  "exports": {
+    ".": "./src/site.mjs",
+    "./kit": "./src/kit/kit.mjs",
+    "./components": "./src/kit/kit-components.mjs",
+    "./jsx-components": "./src/components/index.jsx",
+    "./runtime": "./src/runtime.mjs",
+    "./theme": "./src/theme.mjs",
+    "./compile": "./src/compile.mjs",
+    "./deploy": "./src/deploy.mjs",
+    "./decompile": "./src/decompile.mjs",
+    "./media": "./src/media.mjs",
+    "./inline": "./src/inline.mjs"
+  },
+  "files": [
+    "src/",
+    "types.d.ts",
+    "README.md"
+  ]
 }

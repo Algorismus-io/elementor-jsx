@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import {
   form, field, formInput, formTextarea, formSelect, formCheckbox, formLabel, formSubmit,
   KV, EMAIL_ACTION, assertTree, S, N, B, sect, P0, SZ,
-} from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+} from '../../src/kit/kit.mjs';
 import { resetIds, allNodes, deskProps } from '../helpers.mjs';
 
 beforeEach(() => resetIds());

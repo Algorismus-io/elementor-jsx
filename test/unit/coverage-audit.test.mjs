@@ -12,8 +12,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const MODULES = [
-  join(root, '..', '.claude', 'skills', 'elementor-ultra', 'lib', 'kit.mjs'),
-  join(root, '..', '.claude', 'skills', 'elementor-ultra', 'lib', 'kit-components.mjs'),
+  join(root, 'src', 'kit', 'kit.mjs'),
+  join(root, 'src', 'kit', 'kit-components.mjs'),
   ...readdirSync(join(root, 'src')).filter((f) => f.endsWith('.mjs')).map((f) => join(root, 'src', f)),
   join(root, 'src', 'components', 'index.jsx'),
 ];
@@ -57,7 +57,7 @@ test('every public export is exercised by the suite (add a test when you add an 
 });
 
 test('every sx() shorthand key appears in the sx matrix test (parity language fully covered)', () => {
-  const kc = readFileSync(join(root, '..', '.claude', 'skills', 'elementor-ultra', 'lib', 'kit-components.mjs'), 'utf8');
+  const kc = readFileSync(join(root, 'src', 'kit', 'kit-components.mjs'), 'utf8');
   const body = kc.slice(kc.indexOf('export function sx'), kc.indexOf('/* Ensure a flex-ROW'));
   const keys = [...new Set([...body.matchAll(/\bo\.([a-zA-Z]+)\b/g)].map((m) => m[1]))];
   const sxTest = readFileSync(join(root, 'test', 'unit', 'sx.test.mjs'), 'utf8');

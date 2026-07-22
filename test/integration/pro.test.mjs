@@ -43,7 +43,7 @@ before(async () => {
   ({ compileSite } = await import('../../src/compile.mjs'));
   ({ defineSite } = await import('../../src/site.mjs'));
   ({ h } = await import('../../src/runtime.mjs'));
-  kit = await import('../../../.claude/skills/elementor-ultra/lib/kit.mjs');
+  kit = await import('../../src/kit/kit.mjs');
 });
 
 after(() => { if (enabled && proInstalled) dbRestore(); });
