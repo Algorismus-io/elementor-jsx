@@ -1,0 +1,120 @@
+/** compile.mjs — pure, offline: a site definition → a deployable bundle (trees + kit + fonts). NO MCP. */
+import { renderPage } from './runtime.mjs';
+import { assertTree } from '../../.claude/skills/elementor-ultra/lib/kit.mjs';
+import { extractClasses, mergeClasses } from './classes.mjs';
+
+/**
+ * Normalize every element id to be globally unique within a page, rekeying local styles (whose ids
+ * embed the element id) and settings.classes local refs. A compiler must guarantee this regardless of
+ * how many kit instances / eager helper calls contributed subtrees — sidesteps id-counter collisions.
+ */
+function normalizeIds(elements) {
+  let n = 0;
+  const next = () => `e${(n++).toString(36).padStart(5, '0')}`;
+  const walk = (node) => {
+    const oldId = node.id; const newId = next();
+    node.id = newId;
+    if (node.styles && Object.keys(node.styles).length) {
+      const restyled = {};
+      const map = {};
+      for (const [sid, st] of Object.entries(node.styles)) {
+        const nsid = sid.replace(oldId, newId);
+        map[sid] = nsid;
+        restyled[nsid] = { ...st, id: nsid, label: st.label === oldId ? newId : st.label };
+      }
+      node.styles = restyled;
+      if (node.settings?.classes?.value) node.settings.classes.value = node.settings.classes.value.map((c) => map[c] ?? c);
+    }
+    (node.elements || []).forEach(walk);
+  };
+  elements.forEach(walk);
+  return elements;
+}
+
+const countStyles = (els) => els.reduce((a, n) => a + Object.keys(n.styles || {}).length + countStyles(n.elements || []), 0);
+
+/* Interactive atomic widgets ship as webpack CHUNKS that need elementor's webpack.runtime —
+ * which Elementor 4.1.4 only enqueues when a CLASSIC widget is on the page. A pure-atomic page
+ * with e-tabs/e-youtube gets stranded chunks (dead tabs, no iframe — live-probed). Guarantee the
+ * runtime by injecting an invisible classic html carrier when needed. */
+const CHUNK_WIDGETS = new Set(['e-tabs', 'e-youtube']);
+function ensureRuntimeCarrier(elements) {
+  let hasChunk = false, hasClassic = false;
+  (function walk(ns) {
+    for (const n of ns || []) {
+      if (n.elType === 'e-tabs' || CHUNK_WIDGETS.has(n.widgetType)) hasChunk = true;
+      if (n.elType === 'widget' && n.widgetType && !n.widgetType.startsWith('e-')) hasClassic = true;
+      walk(n.elements);
+    }
+  })(elements);
+  if (hasChunk && !hasClassic) {
+    elements.push({ id: 'ecarrier', elType: 'widget', widgetType: 'html', settings: { html: '<span data-exjsx-runtime-carrier hidden></span>' }, styles: {}, elements: [] });
+  }
+  return elements;
+}
+
+/** popup display sugar → the meta shape Pro's Triggers reads. PHP stores each trigger group as
+ * ['yes', 'delay'=>n] — mixed int+string keys — so the JSON must be {"0":"yes","delay":n}
+ * (an ARRAY ['yes',{delay}] would decode to the wrong PHP shape). */
+const trg = (extra = {}) => ({ 0: 'yes', ...extra });
+function normalizePopupDisplay(display) {
+  if (!display) return { triggers: { page_load: trg({ delay: 0 }) }, timing: [] };
+  if (display.triggers) return display;                       // already canonical
+  const triggers = {};
+  if (display.pageLoad !== undefined) triggers.page_load = trg({ delay: Number(display.pageLoad) || 0 });
+  if (display.scrollPercent !== undefined) triggers.scrolling = trg({ direction: 'down', offset: Number(display.scrollPercent) });
+  if (display.exitIntent) triggers.exit_intent = trg();
+  return { triggers, timing: display.timing || [] };
+}
+
+export function compileSite(site) {
+  if (!site?.$$site) throw new Error('compile: entry must default-export defineSite({...})');
+  const { name, theme, pages, parts } = site;
+  const fonts = new Set();
+  const classMaps = [];
+  let localStyleCount = 0;
+  const compileTree = (node) => {
+    const elements = normalizeIds(ensureRuntimeCarrier(renderPage(node)));
+    assertTree(elements);                       // validate WITH local styles (checks read style props)
+    localStyleCount += countStyles(elements);
+    classMaps.push(extractClasses(elements));   // dedup → shared classes; strips local styles in place
+    return elements;
+  };
+  const compiledPages = pages.map((p) => {
+    const elements = compileTree(p.node);
+    for (const f of Object.values(theme?.spec?.font || {})) fonts.add(f);
+    return { title: p.title, slug: p.slug, template: p.template || 'elementor_canvas', elements };
+  });
+  // theme PARTS compile through the SAME pipeline + registry — header/footer/single share the
+  // design system. `single` maps to the Pro single-post document (conditions: singular posts).
+  const PART_TYPES = { header: { type: 'header', cond: ['include/general'] }, footer: { type: 'footer', cond: ['include/general'] }, single: { type: 'single-post', cond: ['include/singular/post'] }, popup: { type: 'popup', cond: ['include/general'] } };
+  const compiledParts = [];
+  for (const [key, def] of Object.entries(PART_TYPES)) {
+    const part = parts?.[key];
+    if (!part) continue;
+    compiledParts.push({
+      type: def.type,
+      title: part.title || `${name} ${key}`,
+      conditions: part.conditions || def.cond,
+      // popup-only: display settings ({triggers, timing}) → _elementor_popup_display_settings.
+      // Sugar: display:{pageLoad:secs} → the canonical page_load trigger group.
+      ...(key === 'popup' ? { display: normalizePopupDisplay(part.display) } : {}),
+      elements: compileTree(part.node),
+    });
+  }
+  const classes = mergeClasses(classMaps);
+  return {
+    name,
+    // no-theme fallback MUST still carry watermark+version — deploying bare {data:{}} writes an
+    // invalid blob that sprays "Undefined array key watermark" warnings sitewide (caught by the
+    // Pro suite: first theme-less fixture ever deployed).
+    variables: theme ? theme.variablesMeta() : { data: {}, watermark: 0, version: 1 },
+    variableList: theme?._vars || [],
+    classes,                                    // { items, order } → PUT /elementor/v1/global-classes
+    fonts: [...fonts],
+    pages: compiledPages,
+    parts: compiledParts,                       // theme-builder templates (header/footer)
+    stats: { localStylesBefore: localStyleCount, sharedClasses: classes.order.length },
+    generatedBy: 'elementor-jsx',
+  };
+}

@@ -1,0 +1,38 @@
+{
+  "arw-about-1": {
+    "type": "image",
+    "id": 1541,
+    "url": "http://localhost:8915/wp-content/uploads/2026/07/exjsx-arw-about-1.jpg",
+    "alt": "Digital transformation"
+  },
+  "arw-services-1": {
+    "type": "image",
+    "id": 1542,
+    "url": "http://localhost:8915/wp-content/uploads/2026/07/exjsx-arw-services-1.jpg",
+    "alt": "AI Strategy & Consulting"
+  },
+  "arw-services-2": {
+    "type": "image",
+    "id": 1543,
+    "url": "http://localhost:8915/wp-content/uploads/2026/07/exjsx-arw-services-2.jpg",
+    "alt": "Artificial Intelligence Solutions"
+  },
+  "arw-services-3": {
+    "type": "image",
+    "id": 1544,
+    "url": "http://localhost:8915/wp-content/uploads/2026/07/exjsx-arw-services-3.jpg",
+    "alt": "Data Science & Advanced Analytics"
+  },
+  "arw-services-4": {
+    "type": "image",
+    "id": 1545,
+    "url": "http://localhost:8915/wp-content/uploads/2026/07/exjsx-arw-services-4.jpg",
+    "alt": "Software Development"
+  },
+  "arw-services-5": {
+    "type": "image",
+    "id": 1546,
+    "url": "http://localhost:8915/wp-content/uploads/2026/07/exjsx-arw-services-5.jpg",
+    "alt": "Digital Transformation"
+  }
+}

@@ -1,0 +1,140 @@
+/**
+ * sx() — the shorthand→atomic-envelope mapping. This is the core of the parity engine:
+ * every key an author can write must compile to the EXACT verified Elementor envelope shape.
+ * Table-driven: input → expected prop key + deep-equal envelope. Any drift here breaks parity.
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { sx, FLEX } from '../../../.claude/skills/elementor-ultra/lib/kit-components.mjs';
+import { S, C, N, SZ, DIM, M, RAD, BG, GRAD, SHADOW, HUG, AUTO } from '../../../.claude/skills/elementor-ultra/lib/kit.mjs';
+
+const VAR_REF = { $$type: 'global-color-variable', value: 'e-gv-abc1234', __lit: '#123456' };
+const FONT_REF = { $$type: 'global-font-variable', value: 'e-gv-def5678' };
+
+/** [name, input, expectations {propKey: envelope}] */
+const CASES = [
+  // ── background ──
+  ['bg literal hex', { bg: '#0A2230' }, { background: BG('#0A2230') }],
+  ['bg rgba literal', { bg: 'rgba(0,0,0,0.4)' }, { background: BG('rgba(0,0,0,0.4)') }],
+  ['bg gradient array → GRAD', { bg: [130, '#093D57', '#06293C'] }, { background: GRAD(130, '#093D57', '#06293C') }],
+  ['bg variable ref DEGRADES to __lit literal (Elementor 4.1.4 atomic bg)', { bg: VAR_REF },
+    { background: { $$type: 'background', value: { color: C('#123456') } } }],
+  ['bg pre-built background envelope passes through', { bg: BG('#fff') }, { background: BG('#fff') }],
+  ['grad key', { grad: [90, '#000', '#fff'] }, { background: GRAD(90, '#000', '#fff') }],
+
+  // ── spacing ──
+  ['pad number → uniform DIM', { pad: 24 }, { padding: DIM(24) }],
+  ['pad 0 (explicit — the intrinsic-10px guard)', { pad: 0 }, { padding: DIM(0) }],
+  ['pad array [v,h]', { pad: [96, 24] }, { padding: DIM(96, 24) }],
+  ['pad array [t,r,b,l]', { pad: [1, 2, 3, 4] }, { padding: DIM(1, 2, 3, 4) }],
+  ['m number', { m: 12 }, { margin: M(12) }],
+  ['m array with auto (centering)', { m: [0, 'auto'] }, { margin: M(0, 'auto') }],
+  ['center → margin 0 auto', { center: true }, { margin: M(0, 'auto') }],
+  ['gap', { gap: 18 }, { gap: SZ(18) }],
+
+  // ── sizing ──
+  ['w number → px', { w: 320 }, { width: SZ(320) }],
+  ['w percent string', { w: '50%' }, { width: SZ(50, '%') }],
+  ['w px string', { w: '75px' }, { width: SZ(75, 'px') }],
+  ['w hug → fit-content envelope', { w: 'hug' }, { width: HUG }],
+  ['w auto → AUTO envelope', { w: 'auto' }, { width: AUTO }],
+  ['h number', { h: 44 }, { height: SZ(44) }],
+  ['h percent', { h: '100%' }, { height: SZ(100, '%') }],
+  ['maxw', { maxw: 1200 }, { 'max-width': SZ(1200) }],
+  ['minh', { minh: 480 }, { 'min-height': SZ(480) }],
+
+  // ── flex/grid layout ──
+  ['align', { align: 'center' }, { 'align-items': S('center') }],
+  ['justify', { justify: 'space-between' }, { 'justify-content': S('space-between') }],
+  ['dir', { dir: 'row' }, { 'flex-direction': S('row') }],
+  ['wrap true → wrap', { wrap: true }, { 'flex-wrap': S('wrap') }],
+  ['wrap explicit value', { wrap: 'wrap-reverse' }, { 'flex-wrap': S('wrap-reverse') }],
+  ['flex → FLEX composite (grow/shrink/basis)', { flex: 1 }, { flex: FLEX(1) }],
+  ['span → grid-column span envelope', { span: 6 }, { 'grid-column': { $$type: 'span', value: 6 } }],
+  ['display', { display: 'grid' }, { display: S('grid') }],
+  ['gridCols number → display:grid + repeat()', { gridCols: 3 },
+    { display: S('grid'), 'grid-template-columns': S('repeat(3, 1fr)') }],
+  ['gridCols template string passthrough', { gridCols: '2fr 1fr' },
+    { display: S('grid'), 'grid-template-columns': S('2fr 1fr') }],
+  ['pos', { pos: 'absolute' }, { position: S('absolute') }],
+
+  // ── typography ──
+  ['color literal → color envelope', { color: '#E01118' }, { color: C('#E01118') }],
+  ['color variable ref stays LIVE and __lit is STRIPPED (validator rejects extras)', { color: VAR_REF },
+    { color: { $$type: 'global-color-variable', value: 'e-gv-abc1234' } }],
+  ['size → font-size px', { size: 40 }, { 'font-size': SZ(40) }],
+  ['weight number → string envelope', { weight: 700 }, { 'font-weight': S('700') }],
+  ['weight string', { weight: '600' }, { 'font-weight': S('600') }],
+  ['font literal string', { font: 'Poppins' }, { 'font-family': S('Poppins') }],
+  ['font variable ref passes through (live binding)', { font: FONT_REF }, { 'font-family': FONT_REF }],
+  ['ta left → start (validator enum)', { ta: 'left' }, { 'text-align': S('start') }],
+  ['ta right → end', { ta: 'right' }, { 'text-align': S('end') }],
+  ['ta center passthrough', { ta: 'center' }, { 'text-align': S('center') }],
+  ['ta justify passthrough', { ta: 'justify' }, { 'text-align': S('justify') }],
+  ['lh unitless ≤4 → em', { lh: 1.6 }, { 'line-height': SZ(1.6, 'em') }],
+  ['lh boundary 4 → em', { lh: 4 }, { 'line-height': SZ(4, 'em') }],
+  ['lh >4 → px', { lh: 24 }, { 'line-height': SZ(24, 'px') }],
+  ['ls → em', { ls: 0.12 }, { 'letter-spacing': SZ(0.12, 'em') }],
+
+  // ── decoration ──
+  ['radius', { radius: 24 }, { 'border-radius': RAD(24) }],
+  ['shadow array → SHADOW', { shadow: [8, 24, -8, 'rgba(0,0,0,0.3)'] }, { 'box-shadow': SHADOW(8, 24, -8, 'rgba(0,0,0,0.3)') }],
+  ['shadow envelope passthrough', { shadow: SHADOW(2, 4, 0, '#000') }, { 'box-shadow': SHADOW(2, 4, 0, '#000') }],
+  ['fit → object-fit', { fit: 'cover' }, { 'object-fit': S('cover') }],
+  ['border [w,color] → width+color+style solid', { border: [2, '#E4E9DC'] },
+    { 'border-width': SZ(2), 'border-color': C('#E4E9DC'), 'border-style': S('solid') }],
+  ['border color-only → 1px', { border: '#E4E9DC' },
+    { 'border-width': SZ(1), 'border-color': C('#E4E9DC'), 'border-style': S('solid') }],
+];
+
+for (const [name, input, expected] of CASES) {
+  test(`sx: ${name}`, () => {
+    const out = sx(input);
+    for (const [key, env] of Object.entries(expected)) {
+      assert.deepEqual(out[key], env, `prop "${key}"`);
+    }
+    // no unexpected keys beyond the expected set for a single-input case
+    assert.deepEqual(Object.keys(out).sort(), Object.keys(expected).sort(), 'exact key set');
+  });
+}
+
+test('sx: responsive recursion — tablet/mobile compile to _t/_m variant props', () => {
+  const out = sx({ size: 40, mobile: { size: 24, ta: 'center' }, tablet: { size: 32 } });
+  assert.deepEqual(out['font-size'], SZ(40));
+  assert.deepEqual(out._t, { 'font-size': SZ(32) });
+  assert.deepEqual(out._m, { 'font-size': SZ(24), 'text-align': S('center') });
+});
+
+test('sx: nested responsive inside responsive is NOT a thing (flat single level)', () => {
+  const out = sx({ mobile: { size: 20 } });
+  assert.equal(out._m._m, undefined);
+});
+
+test('sx: props escape hatch merges raw envelopes and WINS on conflict', () => {
+  const out = sx({ w: 100, props: { width: SZ(50, '%'), 'z-index': N(5) } });
+  assert.deepEqual(out.width, SZ(50, '%'), 'props overrides shorthand');
+  assert.deepEqual(out['z-index'], N(5));
+});
+
+test('sx: empty input → empty props (no accidental defaults)', () => {
+  assert.deepEqual(sx({}), {});
+  assert.deepEqual(sx(), {});
+});
+
+test('sx: grad wins over bg when both given (grad applied last)', () => {
+  const out = sx({ bg: '#fff', grad: [90, '#000', '#111'] });
+  assert.deepEqual(out.background, GRAD(90, '#000', '#111'));
+});
+
+test('sx: zero values are not dropped (pad:0, gap:0, size:0, ls:0 must emit)', () => {
+  const out = sx({ pad: 0, gap: 0, m: 0, radius: 0, ls: 0, lh: 0, minh: 0 });
+  assert.ok(out.padding && out.gap && out.margin && out['border-radius'], 'zero spacing kept');
+  assert.deepEqual(out['letter-spacing'], SZ(0, 'em'));
+  assert.deepEqual(out['line-height'], SZ(0, 'em'));
+  assert.deepEqual(out['min-height'], SZ(0));
+});
+
+test('FLEX: composite shape (flexGrow/flexShrink/flexBasis) with auto basis', () => {
+  assert.deepEqual(FLEX(1), { $$type: 'flex', value: { flexGrow: N(1), flexShrink: N(1), flexBasis: SZ(0) } });
+  assert.deepEqual(FLEX(2, 0, 'auto').value.flexBasis, AUTO);
+});

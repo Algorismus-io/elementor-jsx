@@ -1,0 +1,23 @@
+{
+  "name": "elementor-jsx",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A React-level, file-first framework that compiles JSX + a theme into an Elementor V4 site bundle and deploys it in one shot (no per-token round-trips).",
+  "bin": {
+    "exjsx": "./src/cli.mjs"
+  },
+  "scripts": {
+    "build": "node src/cli.mjs build",
+    "deploy": "node src/cli.mjs deploy",
+    "test": "node --test 'test/unit/*.test.mjs'",
+    "test:it": "EXJSX_IT=1 node --test --test-concurrency=1 'test/integration/*.test.mjs'",
+    "test:all": "npm test && npm run test:it"
+  },
+  "dependencies": {
+    "esbuild": "^0.24.0"
+  },
+  "devDependencies": {
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0"
+  }
+}
