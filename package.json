@@ -6,6 +6,7 @@
   "bin": {
     "exjsx": "./src/cli.mjs"
   },
+  "types": "./types.d.ts",
   "scripts": {
     "build": "node src/cli.mjs build",
     "deploy": "node src/cli.mjs deploy",

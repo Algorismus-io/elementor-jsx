@@ -10,12 +10,40 @@ import { join } from 'node:path';
 
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
+/* 4.1↔4.2 FORWARD-COMPAT (found by the upgrade rehearsal): Span_Prop_Type changed base class —
+ * 4.1.4 validates a NUMBER value ({$$type:'span',value:6}), 4.2.0 a STRING ("span 6"); neither
+ * form passes the other's validator. Authors keep writing numbers (span: 6); deploy detects the
+ * target's Elementor version and adapts every grid-column/grid-row span in place. */
+function adaptSpansForVersion(bundle, version) {
+  const major = parseFloat(version) || 0;
+  const toTarget = (v) => {
+    if (!v || v.$$type !== 'span') return v;
+    if (major >= 4.2 && typeof v.value === 'number') return { ...v, value: `span ${v.value}` };
+    if (major < 4.2 && typeof v.value === 'string') { const m = /span\s+(\d+)/.exec(v.value); if (m) return { ...v, value: Number(m[1]) }; }
+    return v;
+  };
+  const walkProps = (props) => { for (const k of ['grid-column', 'grid-row']) if (props?.[k]) props[k] = toTarget(props[k]); };
+  const walkStyles = (styles) => { for (const st of Object.values(styles || {})) for (const va of st.variants || []) walkProps(va.props); };
+  const walkEls = (ns) => { for (const n of ns || []) { walkStyles(n.styles); walkEls(n.elements); } };
+  for (const item of Object.values(bundle.classes?.items || {})) for (const va of item.variants || []) walkProps(va.props);
+  for (const p of bundle.pages || []) walkEls(p.elements);
+  for (const p of bundle.parts || []) walkEls(p.elements);
+  return major >= 4.2 ? 'string (4.2+)' : 'number (4.1)';
+}
+
 export async function deployBundle(bundle, cfg = {}) {
   const wpcli = (cfg.wpcli || process.env.EXJSX_WPCLI || 'wp').split(' ');
   const cli = cfg.cli || process.env.EXJSX_CLI;
   const wpUrl = cfg.wpUrl || process.env.WP_URL;
   const auth = 'Basic ' + Buffer.from(`${process.env.WP_USER}:${process.env.WP_APP_PASSWORD}`).toString('base64');
   const report = { variables: 0, classes: 0, pages: [] };
+
+  // 0) version-adaptive span form (wp-cli; REST-only targets keep the authored form)
+  try {
+    const ver = sh(wpcli[0], [...wpcli.slice(1), 'plugin', 'get', 'elementor', '--field=version']).trim();
+    report.elementorVersion = ver;
+    report.spanForm = adaptSpansForVersion(bundle, ver);
+  } catch { /* no wp-cli — leave spans as authored */ }
 
   // 1) ONE-SHOT kit write: all variables in a single update_post_meta (no per-token round-trips).
   // Requires wp-cli (EXJSX_WPCLI). GRACEFUL: if wp-cli isn't available (e.g. a REST-only tester setup),
@@ -63,6 +91,43 @@ export async function deployBundle(bundle, cfg = {}) {
     } catch { report.loopExperiment = 'wp-cli unavailable — enable elementor_experiment-e_pro_collection_loop manually or loops will 422'; }
   }
 
+  // 1d) SEO runtime — pages carrying `seo` need the tiny mu-plugin that renders _exjsx_seo meta
+  //     (WP core emits NO meta description/og tags without an SEO plugin). Idempotent, version-tagged.
+  if (bundle.pages?.some((p) => p.seo) && !cfg.dry) {
+    const MU = `<?php
+/* exjsx-seo v1 — per-page SEO meta from the _exjsx_seo post meta. Managed by exjsx deploy. */
+add_filter( 'pre_get_document_title', function ( $t ) {
+  if ( ! is_singular() ) { return $t; }
+  $seo = get_post_meta( get_queried_object_id(), '_exjsx_seo', true );
+  return ( is_array( $seo ) && ! empty( $seo['title'] ) ) ? $seo['title'] : $t;
+}, 20 );
+add_action( 'wp_head', function () {
+  if ( ! is_singular() ) { return; }
+  $seo = get_post_meta( get_queried_object_id(), '_exjsx_seo', true );
+  if ( ! is_array( $seo ) ) { return; }
+  if ( ! empty( $seo['description'] ) ) { echo '<meta name="description" content="' . esc_attr( $seo['description'] ) . '">' . "\\n"; }
+  if ( ! empty( $seo['noindex'] ) ) { echo '<meta name="robots" content="noindex,follow">' . "\\n"; }
+  if ( ! empty( $seo['canonical'] ) ) { echo '<link rel="canonical" href="' . esc_url( $seo['canonical'] ) . '">' . "\\n"; }
+  $title = ! empty( $seo['title'] ) ? $seo['title'] : get_the_title();
+  echo '<meta property="og:title" content="' . esc_attr( $title ) . '">' . "\\n";
+  if ( ! empty( $seo['description'] ) ) { echo '<meta property="og:description" content="' . esc_attr( $seo['description'] ) . '">' . "\\n"; }
+  if ( ! empty( $seo['ogImage'] ) ) { echo '<meta property="og:image" content="' . esc_url( $seo['ogImage'] ) . '">' . "\\n"; }
+}, 5 );
+`;
+    try {
+      const muB64 = Buffer.from(MU).toString('base64');
+      // VERIFY the write — file_put_contents fails silently on root-owned mu-plugins dirs
+      // (field-found: the dir needs to be writable by the PHP user; chown it once per stack).
+      const out = sh(wpcli[0], [...wpcli.slice(1), 'eval',
+        `$d = defined('WPMU_PLUGIN_DIR') ? WPMU_PLUGIN_DIR : WP_CONTENT_DIR . '/mu-plugins';`
+        + `if ( ! is_dir($d) ) { wp_mkdir_p($d); }`
+        + `$ok = @file_put_contents($d . '/exjsx-seo.php', base64_decode('${muB64}'));`
+        + `echo $ok ? 'seo-runtime=ok' : 'seo-runtime=UNWRITABLE:' . $d;`]);
+      report.seoRuntime = out.includes('seo-runtime=ok') ? 'installed'
+        : `mu-plugins dir not writable by PHP (${(out.match(/UNWRITABLE:(\S+)/) || [])[1] || '?'}) — chown it to the web user, or install exjsx-seo.php manually`;
+    } catch { report.seoRuntime = 'wp-cli unavailable — SEO meta will not render (install exjsx-seo.php manually)'; }
+  }
+
   // 2) pages — IDEMPOTENT upsert by slug (update in place if the slug exists, else create). Deterministic
   //    ids (normalizeIds) mean a re-deploy of unchanged source is a clean no-op update, not a new page.
   const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -97,6 +162,13 @@ export async function deployBundle(bundle, cfg = {}) {
     await fetch(eu(`/documents/${id}/prime-css`), { method: 'POST', headers: jhead, body: '{}' }).catch(() => {});
     // ensure canvas template + stable slug via WP REST.
     try { await fetch(`${wpUrl}/wp-json/wp/v2/pages/${id}`, { method: 'POST', headers: jhead, body: JSON.stringify({ slug, template: p.template === 'elementor_canvas' ? 'elementor_canvas' : undefined }) }); } catch {}
+    // per-page SEO meta (mu-plugin renders it; wp-cli write — REST has no arbitrary-meta route)
+    if (p.seo) {
+      try {
+        const seoB64 = Buffer.from(JSON.stringify(p.seo)).toString('base64');
+        sh(wpcli[0], [...wpcli.slice(1), 'eval', `update_post_meta(${id}, '_exjsx_seo', json_decode(base64_decode('${seoB64}'), true)); echo 'seo=ok';`]);
+      } catch { /* reported via seoRuntime */ }
+    }
     report.pages.push({ title: p.title, id, slug, action });
   }
   // 3) THEME PARTS (header/footer) — Elementor Pro theme-builder templates, deployed via wp-cli

@@ -49,14 +49,16 @@ before(async () => {
 after(() => { if (enabled) dbRestore(); });
 
 /* ── 1. version pin: the drift gate ── */
-test('version pin: Elementor 4.1.4 — the version every verified rendering fact was proven on', skip, () => {
+test('version pin: Elementor 4.1.4 / 4.2.0 — versions every verified rendering fact was proven on', skip, () => {
   const list = wp('plugin', 'list', '--format=csv');
   const row = list.split('\n').find((l) => l.startsWith('elementor,'));
   const version = row.split(',')[3];
-  assert.equal(version, '4.1.4',
-    `Elementor is ${version} but the suite's verified rendering facts (label classes, logical longhands, ` +
-    'var(--label) emission, sanitization, hover/:focus-visible) were proven on 4.1.4. ' +
-    'Re-run the full suite, re-verify test/README.md facts, then update this pin.');
+  // 4.2.0 certified by the 2026-07-22 upgrade rehearsal: full suite green with ONE adaptation —
+  // Span_Prop_Type flipped Number→String base ("span 6"); deploy.adaptSpansForVersion covers both.
+  assert.ok(['4.1.4', '4.2.0'].includes(version),
+    `Elementor is ${version} but the suite's verified rendering facts were proven on 4.1.4/4.2.0. ` +
+    'Run the upgrade rehearsal (snapshot DB + plugin dir, upgrade, npm run test:it, catalog deltas), ' +
+    're-verify test/README.md facts, then extend this pin.');
 });
 
 /* ── 2. editor smoke: the real Elementor editor on our page ── */

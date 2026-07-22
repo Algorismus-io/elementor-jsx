@@ -10,6 +10,9 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, extname } from 'node:path';
+import { createHash } from 'node:crypto';
+
+const sha1 = (buf) => createHash('sha1').update(buf).digest('hex').slice(0, 16);
 
 const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.gif': 'image/gif', '.woff2': 'font/woff2', '.woff': 'font/woff' };
 
@@ -33,6 +36,14 @@ export async function sideloadManifest(manifestPath, mapPath = 'data/media-map.j
       continue;
     }
 
+    // hash-cache: a local file whose bytes match the map entry needs ZERO network calls
+    if (e.file && map[e.slot]?.hash) {
+      const p0 = resolve(e.file);
+      if (existsSync(p0) && sha1(readFileSync(p0)) === map[e.slot].hash) {
+        console.log(`  SAME  ${e.slot} → id ${map[e.slot].id} (hash match, skipped)`);
+        continue;
+      }
+    }
     // idempotency: an attachment slugged exjsx-<slot> already in the library wins
     const slug = `exjsx-${e.slot}`;
     const found = await (await fetch(`${wpUrl}/wp-json/wp/v2/media?search=${slug}&per_page=10`, { headers: { Authorization: auth } })).json();
@@ -56,7 +67,7 @@ export async function sideloadManifest(manifestPath, mapPath = 'data/media-map.j
     if (!up.ok) { console.log(`  FAIL  ${e.slot} — upload HTTP ${up.status}: ${(await up.text()).slice(0, 120)}`); continue; }
     const att = await up.json();
     if (e.alt) await fetch(`${wpUrl}/wp-json/wp/v2/media/${att.id}`, { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ alt_text: e.alt }) });
-    map[e.slot] = { type: 'image', id: att.id, url: att.source_url, alt: e.alt || '' };
+    map[e.slot] = { type: 'image', id: att.id, url: att.source_url, alt: e.alt || '', ...(e.file ? { hash: sha1(bytes) } : {}) };
     console.log(`  UP    ${e.slot} → id ${att.id} (${Math.round(bytes.length / 1024)} KB)`);
   }
 

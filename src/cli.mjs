@@ -62,6 +62,35 @@ async function build(entry) {
       console.log(`deployed: ${r.variables} variables + ${r.classes} classes (2 kit writes), ${r.pages.length} page(s)`);
       r.pages.forEach((p) => console.log(`  ${p.action} "${p.title}" → id ${p.id} (/${p.slug}/)`));
     }
+  } else if (cmd === 'watch') {
+    // exjsx watch <entry.jsx> [--deploy] — rebuild on change; optional auto-deploy of the bundle.
+    if (!arg) { console.error('usage: exjsx watch <entry.jsx> [--deploy]'); process.exit(2); }
+    const { watch } = await import('node:fs');
+    const dir = dirname(resolve(arg));
+    const doDeploy = process.argv.includes('--deploy');
+    let running = false, queued = false;
+    const rebuild = async () => {
+      if (running) { queued = true; return; }
+      running = true;
+      const t0 = Date.now();
+      try {
+        const out = await build(arg);
+        if (doDeploy) {
+          const r = await deployBundle(JSON.parse(readFileSync(out, 'utf8')));
+          console.log(`  deployed ${r.pages.length} page(s) in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+        }
+      } catch (e) { console.error(`  ✗ ${String(e.message).split('\n')[0]}`); }
+      running = false;
+      if (queued) { queued = false; rebuild(); }
+    };
+    await rebuild();
+    console.log(`watching ${dir} …`);
+    let t = null;
+    watch(dir, { recursive: true }, (_ev, f) => {
+      if (!/\.(jsx|mjs|json)$/.test(f || '') || String(f).includes('.bundle.json')) return;
+      clearTimeout(t); t = setTimeout(rebuild, 150);   // debounce editor bursts
+    });
+    await new Promise(() => {});                       // stay alive
   } else if (cmd === 'media') {
     const { sideloadManifest } = await import('./media.mjs');
     await sideloadManifest(arg || 'data/images.manifest.mjs', (arg2 && !arg2.startsWith('--')) ? arg2 : 'data/media-map.json');

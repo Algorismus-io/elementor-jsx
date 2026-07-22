@@ -134,6 +134,10 @@ function emitNode(n, ind, ctx) {
   const attrs = [];
   const cls = classes.length ? classes.join(' ') : null;
   if (cls) attrs.push(`gcls={${q(cls)}}`);   // external global-class refs → gcls (deploy carries their defs)
+  // interactions round-trip: emit animate={[…interaction-item envelopes…]} — interact() passes
+  // pre-built envelopes through verbatim (they used to be silently DROPPED on decompile).
+  const ixItems = n.interactions?.items || (typeof n.interactions === 'string' ? (JSON.parse(n.interactions || '{}').items || []) : []);
+  if (ixItems.length) attrs.push(`animate={${JSON.stringify(ixItems)}}`);
   const link = s.link?.value?.href || s.link?.href || (s.link?.value?.destination);
   if (link) attrs.push(`href={${q(typeof link === 'object' ? (link.value || '') : link)}}`);
   for (const [k, val] of Object.entries(sxSrc)) attrs.push(k === 'center' ? 'center' : `${k}={${val}}`);
@@ -150,16 +154,30 @@ function emitNode(n, ind, ctx) {
 
   // widgets (leaf)
   // content emitted as a single {"…"} STRING child so inline HTML (accent <span>s, <br>) survives recompile
+  const isDynV = (v) => v && v.$$type === 'dynamic';
   if (w === 'html' || w === 'shortcode') return `${pad}<html raw={${q(stringV(s.html) ?? '')}} />`;
-  if (w === 'e-heading') { const tagA = (tag && tag !== 'h2') ? `tag={${q(tag)}}` : ''; return `${pad}<heading ${A(tagA)}>{${q(htmlV3(s.title))}}</heading>`; }
-  if (w === 'e-paragraph') return `${pad}<text ${A()}>{${q(htmlV3(s.paragraph))}}</text>`;
+  if (w === 'e-heading') {
+    const tagA = (tag && tag !== 'h2') ? `tag={${q(tag)}}` : '';
+    // dynamic-bound content round-trips via dyn={…} (htmlV3() used to flatten it to '' — data loss)
+    if (isDynV(s.title)) return `${pad}<heading ${A(tagA)} dyn={${JSON.stringify(s.title)}} />`;
+    return `${pad}<heading ${A(tagA)}>{${q(htmlV3(s.title))}}</heading>`;
+  }
+  if (w === 'e-paragraph') {
+    if (isDynV(s.paragraph)) return `${pad}<text ${A()} dyn={${JSON.stringify(s.paragraph)}} />`;
+    return `${pad}<text ${A()}>{${q(htmlV3(s.paragraph))}}</text>`;
+  }
   if (w === 'e-button') return `${pad}<Button text={${q(htmlV3(s.text))}} ${A()} />`;
   if (w === 'e-image') { const id = s.image?.value?.src?.value?.id?.value; return `${pad}<img src={${id ?? 0}} ${A()} />`; }
   // widget label rides INSIDE the expression braces — a sibling {/*…*/} block is valid JSX-children
   // syntax but INVALID JS when the node sits at the top-level array (caught by the test suite).
   if (w) return `${pad}<Raw>{${JSON.stringify(n)} /* widget:${w} */}</Raw>`;
 
-  // container (e-flexbox / e-div-block)
+  // container (e-flexbox / e-div-block). OTHER container elTypes (e-form, e-tabs family,
+  // e-collection-loop…) round-trip as <Raw> — the old code emitted them as <box>, silently
+  // DROPPING the elType + settings (a form decompiled into a plain div; data loss).
+  if (e && e !== 'e-flexbox' && e !== 'e-div-block') {
+    return `${pad}<Raw>{${JSON.stringify(n)} /* element:${e} */}</Raw>`;
+  }
   const isRow = sxSrc.dir === '"row"';
   const Tag = tag === 'section' ? 'section' : 'box';
   const tagAttr = (tag && tag !== 'div' && tag !== 'section') ? `tag=${q(tag)}` : '';

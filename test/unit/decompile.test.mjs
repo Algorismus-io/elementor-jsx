@@ -145,6 +145,41 @@ test('style round-trip: variable refs pass through VERBATIM (props escape hatch)
   assert.deepEqual(props.color, varRef, 'var ref byte-identical after round-trip');
 });
 
+test('decompile: DYNAMIC content round-trips via dyn={…} (used to flatten to empty string)', () => {
+  const DYN = { $$type: 'dynamic', value: { name: 'post-title', group: 'post', settings: {} } };
+  const tree = [{ id: 'd1', elType: 'widget', widgetType: 'e-heading', settings: { tag: { $$type: 'string', value: 'h1' }, title: DYN, classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [] }];
+  const src = decompile(tree, { name: 'Dyn', slug: 'dyn' });
+  assert.match(src, /<heading[^>]*dyn=\{\{"\$\$type":"dynamic"/, 'dyn attr emitted');
+  const bundle = rebuild(tree, 'DynRT');
+  const out = allNodes(bundle.pages[0].elements).find((n) => n.widgetType === 'e-heading');
+  assert.deepEqual(out.settings.title, DYN, 'dynamic envelope byte-identical after round-trip');
+});
+
+test('decompile: INTERACTIONS round-trip via animate={…} (used to be silently dropped)', () => {
+  const item = { $$type: 'interaction-item', value: { interaction_id: { $$type: 'string', value: 'ix9' }, trigger: { $$type: 'string', value: 'load' }, animation: { $$type: 'animation-preset-props', value: { effect: { $$type: 'string', value: 'fade' }, type: { $$type: 'string', value: 'in' }, direction: { $$type: 'string', value: '' }, timing_config: { $$type: 'timing-config', value: { duration: { $$type: 'size', value: { unit: 'ms', size: 600 } }, delay: { $$type: 'size', value: { unit: 'ms', size: 0 } } } } } } } };
+  const tree = [{ id: 'x1', elType: 'widget', widgetType: 'e-heading', settings: { tag: { $$type: 'string', value: 'h2' }, title: { $$type: 'html-v3', value: { content: { $$type: 'string', value: 'Animated' }, children: [] } }, classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [], interactions: { version: 1, items: [item] } }];
+  const src = decompile(tree, { name: 'Ix', slug: 'ix' });
+  assert.match(src, /animate=\{\[\{"\$\$type":"interaction-item"/, 'animate attr emitted');
+  const bundle = rebuild(tree, 'IxRT');
+  const out = allNodes(bundle.pages[0].elements).find((n) => n.widgetType === 'e-heading');
+  assert.equal(out.interactions.items.length, 1);
+  assert.deepEqual(out.interactions.items[0], item, 'interaction envelope byte-identical');
+});
+
+test('decompile: NON-FLEXBOX container elTypes (e-form/e-tabs) → <Raw>, not a lossy <box>', () => {
+  const tree = [{ id: 'f1', elType: 'e-form', settings: { 'form-name': { $$type: 'string', value: 'contact' }, classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [
+    { id: 'f2', elType: 'widget', widgetType: 'e-form-submit-button', settings: { text: { $$type: 'html-v3', value: { content: { $$type: 'string', value: 'Send' }, children: [] } }, tag: { $$type: 'string', value: 'button' }, classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [] },
+  ] }];
+  const src = decompile(tree, { name: 'FormRT', slug: 'formrt' });
+  assert.match(src, /<Raw>\{.*\/\* element:e-form \*\/\}<\/Raw>/, 'form container preserved verbatim');
+  assert.ok(!src.includes('<box'), 'NOT decompiled into a plain div');
+  const bundle = rebuild(tree, 'FormRT2');
+  const out = bundle.pages[0].elements[0];
+  assert.equal(out.elType, 'e-form', 'elType survives');
+  assert.equal(out.settings['form-name'].value, 'contact', 'settings survive');
+  assert.equal(out.elements[0].widgetType, 'e-form-submit-button', 'children survive');
+});
+
 test('decompile: e-button → <Button>, unknown widget → <Raw> passthrough survives rebuild', () => {
   const tree = [
     { id: 'b1', elType: 'widget', widgetType: 'e-button', settings: { tag: { $$type: 'string', value: 'a' }, text: { $$type: 'html-v3', value: { content: { $$type: 'string', value: 'Click' }, children: [] } }, link: { $$type: 'link', value: { destination: { $$type: 'url', value: '/go/' }, isTargetBlank: { $$type: 'boolean', value: false } } }, classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [] },

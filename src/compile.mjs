@@ -83,11 +83,19 @@ export function compileSite(site) {
   const compiledPages = pages.map((p) => {
     const elements = compileTree(p.node);
     for (const f of Object.values(theme?.spec?.font || {})) fonts.add(f);
-    return { title: p.title, slug: p.slug, template: p.template || 'elementor_canvas', elements };
+    // seo: {title, description, ogImage, canonical, noindex} → _exjsx_seo meta (deploy ships the runtime)
+    return { title: p.title, slug: p.slug, template: p.template || 'elementor_canvas', ...(p.seo ? { seo: p.seo } : {}), elements };
   });
   // theme PARTS compile through the SAME pipeline + registry — header/footer/single share the
   // design system. `single` maps to the Pro single-post document (conditions: singular posts).
-  const PART_TYPES = { header: { type: 'header', cond: ['include/general'] }, footer: { type: 'footer', cond: ['include/general'] }, single: { type: 'single-post', cond: ['include/singular/post'] }, popup: { type: 'popup', cond: ['include/general'] } };
+  const PART_TYPES = {
+    header: { type: 'header', cond: ['include/general'] },
+    footer: { type: 'footer', cond: ['include/general'] },
+    single: { type: 'single-post', cond: ['include/singular/post'] },
+    popup: { type: 'popup', cond: ['include/general'] },
+    archive: { type: 'archive', cond: ['include/archive'] },          // blog index / category / tag
+    error404: { type: 'error-404', cond: ['include/general'] },       // the 404 document matches via its own location
+  };
   const compiledParts = [];
   for (const [key, def] of Object.entries(PART_TYPES)) {
     const part = parts?.[key];

@@ -83,6 +83,20 @@ test('popup part: compiles with display sugar → PHP-shape trigger groups ({"0"
   assert.deepEqual(popup.display.timing, []);
 });
 
+test('archive + error404 parts: types + default conditions', () => {
+  const b = compileSite(defineSite({
+    name: 'th',
+    pages: [{ title: 'p', slug: 'p', node: h('text', {}, 'x') }],
+    parts: {
+      archive: { node: h('box', { pad: 0 }, h('h1', {}, 'Archive')) },
+      error404: { node: h('box', { pad: 0 }, h('h1', {}, 'Lost')) },
+    },
+  }));
+  const types = Object.fromEntries(b.parts.map((p) => [p.type, p.conditions]));
+  assert.deepEqual(types['archive'], ['include/archive']);
+  assert.deepEqual(types['error-404'], ['include/general']);
+});
+
 test('popup part: default display = page_load immediate; scroll + exit-intent sugar; canonical passthrough', () => {
   const mk = (display) => compileSite(defineSite({ name: 'pp', pages: [{ title: 'p', slug: 'p', node: h('text', {}, 'x') }], parts: { popup: { node: h('box', { pad: 0 }), display } } })).parts[0].display;
   assert.deepEqual(mk(undefined).triggers, { page_load: { 0: 'yes', delay: 0 } });

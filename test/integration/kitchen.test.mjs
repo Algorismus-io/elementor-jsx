@@ -114,6 +114,44 @@ test('interactive: tabs SWITCH on click and the youtube iframe INJECTS (webpack 
   } finally { await browser.close(); }
 });
 
+/* ── SEO / page meta ── */
+test('seo: title tag, meta description, og:*, canonical, noindex all render from pages[].seo', skip, async () => {
+  const { compileSite } = await import('../../src/compile.mjs');
+  const { defineSite } = await import('../../src/site.mjs');
+  const { h } = await import('../../src/runtime.mjs');
+  const { inlineLocal } = await import('../../src/inline.mjs');
+  const site = defineSite({
+    name: 'exjsx-seo',
+    pages: [{
+      title: 'SEO Page', slug: 'exjsx-seo-page',
+      seo: {
+        title: 'Custom SEO Title | Brand',
+        description: 'A hand-written meta description for the parity suite.',
+        ogImage: `${WP_URL}/wp-content/uploads/exjsx-sample.mp4`.replace('.mp4', '.png') || `${WP_URL}/og.png`,
+        canonical: `${WP_URL}/exjsx-seo-page/`,
+        noindex: true,
+      },
+      node: h('section', { pad: [40, 24] }, h('h1', { size: 32 }, 'SEO body')),
+    }],
+  });
+  // inline mode: this mini-site must NOT own/prune the kitchen's registry (namespace rule)
+  const bundle = compileSite(site);
+  inlineLocal(bundle);
+  const r = await deployBundle(bundle);
+  assert.equal(r.seoRuntime, 'installed', `mu-plugin runtime shipped (${r.seoRuntime})`);
+  const { html } = await renderedPage('exjsx-seo-page');
+  assert.match(html, /<title>Custom SEO Title \| Brand<\/title>/, 'document title overridden');
+  assert.match(html, /<meta name="description" content="A hand-written meta description for the parity suite\."/, 'meta description');
+  assert.match(html, /<meta property="og:title" content="Custom SEO Title \| Brand"/, 'og:title');
+  assert.match(html, /<meta property="og:description"/, 'og:description');
+  assert.match(html, /<meta property="og:image" content="http/, 'og:image');
+  assert.match(html, new RegExp(`<link rel="canonical" href="${WP_URL.replace(/[/:]/g, '\\$&')}/exjsx-seo-page/"`), 'canonical');
+  assert.match(html, /<meta name="robots" content="noindex,follow"/, 'noindex');
+  // pages WITHOUT seo are untouched (no phantom meta)
+  const { html: plain } = await renderedPage('exjsx-k-home');
+  assert.ok(!plain.includes('name="robots" content="noindex'), 'no noindex leakage onto other pages');
+});
+
 /* ── interactions (FREE core motion) ── */
 test('interactions: footer JSON blob + motion.js served, fade-in ANIMATES in a real browser', skip, async (t) => {
   const { html } = await renderedPage('exjsx-k-home');
@@ -190,6 +228,10 @@ test('media: sideload a generated PNG, re-run KEEPS the same attachment (idempot
   assert.ok(m1['it-probe']?.id, 'attachment created');
   const m2 = await sideloadManifest(manifest, join(dir, 'map2.json'));
   assert.equal(m2['it-probe'].id, m1['it-probe'].id, 'second run reuses the attachment (KEEP)');
+  // hash-cache: re-running against the SAME map with unchanged bytes needs zero network (SAME path)
+  assert.ok(m1['it-probe'].hash, 'hash recorded for local files');
+  const m3 = await sideloadManifest(manifest, map1);
+  assert.equal(m3['it-probe'].id, m1['it-probe'].id, 'hash match → skipped, id stable');
   const att = await (await fetch(`${WP_URL}/wp-json/wp/v2/media/${m1['it-probe'].id}`)).json();
   assert.equal(att.alt_text, 'test probe', 'alt text applied');
 });

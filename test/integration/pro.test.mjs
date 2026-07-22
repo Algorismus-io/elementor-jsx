@@ -312,6 +312,39 @@ test('popup: parts.popup deploys with page_load trigger and OPENS as a visible d
   } finally { await browser.close(); }
 });
 
+test('archive + 404 templates: blog index renders our archive doc; garbage URL renders our 404 doc', skip, async () => {
+  const { dyn, loopGrid, S } = kit;
+  wp('post', 'create', '--post_type=post', '--post_status=publish', '--post_title=Archive Fixture Post', '--porcelain');
+  const site = defineSite({
+    name: 'exjsx-arc',
+    pages: [{ title: 'Arc Home', slug: 'exjsx-arc-home', node: h('text', {}, 'home') }],
+    parts: {
+      archive: { node: h('section', { pad: [50, 24], gap: 16 },
+        h('h1', { dyn: dyn.archiveTitle(), size: 38, cls: 'arc-title' }),
+        loopGrid({ source: 'post', perPage: 5 }, [kit.heading('h3', dyn.postTitle())])) },
+      error404: { node: h('section', { pad: [80, 24], gap: 12 },
+        h('h1', { size: 44 }, 'EXJSX-404-LOST'),
+        h('text', { href: '/', size: 15 }, 'Take me home')) },
+    },
+  });
+  const r = await deployBundle(compileSite(site));
+  const types = Object.fromEntries(r.parts.map((p) => [p.type, p.action]));
+  assert.match(types['archive'] || '', /^(created|updated)$/, 'archive template deployed');
+  assert.match(types['error-404'] || '', /^(created|updated)$/, '404 template deployed');
+
+  // the blog posts index (home_url/?post_type=post archive) — use the date/author-agnostic ?s= no…
+  // simplest true archive: the category archive for the default category.
+  const arch = await (await fetch(`${WP_URL}/?cat=1`)).text();
+  assert.match(arch, /class="[^"]*arc-title/, 'our archive doc applied on a category archive');
+  assert.match(arch, /Archive Fixture Post/, 'loop inside the archive resolves posts');
+
+  const nf = await fetch(`${WP_URL}/definitely-not-a-page-xyz-9182/`);
+  const nfHtml = await nf.text();
+  assert.equal(nf.status, 404, 'still a real 404 status');
+  assert.match(nfHtml, /EXJSX-404-LOST/, 'our 404 doc rendered');
+  assert.match(nfHtml, /Take me home/, '404 content complete');
+});
+
 test('parity pipeline unchanged under Pro: labels + live var binding still emit', skip, async () => {
   const { defineTheme } = await import('../../src/theme.mjs');
   const theme = defineTheme({ name: 'exjsx-prochk', color: { main: '#0B6E4F' } });
