@@ -1,0 +1,4 @@
+#!/bin/sh
+# run the offline unit suite before any push (integration is manual: npm run test:it)
+cd "$(git rev-parse --show-toplevel)" && npm test -- --test-reporter=dot || {
+  echo "pre-push: unit suite failed — push aborted"; exit 1; }
