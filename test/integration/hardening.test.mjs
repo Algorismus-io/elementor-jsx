@@ -22,7 +22,7 @@ import {
 const skip = enabled ? false : { skip: 'EXJSX_IT!=1 (live integration disabled)' };
 const PW = process.env.EXJSX_IT_PLAYWRIGHT
   || join(root, '..', 'wpos-elementor-toolset', 'packages', 'server', 'node_modules', 'playwright', 'index.mjs');
-const CLI = join(root, '..', '.claude', 'skills', 'elementor-ultra', 'lib', 'cli.mjs');
+const CLI = process.env.EXJSX_ULTRA_CLI || join(root, '..', '.claude', 'skills', 'elementor-ultra', 'lib', 'cli.mjs');
 const BASE = join(root, 'test', 'baselines');
 const ADMIN_PASS = 'exjsx-it-editor-pass-1';
 const S = { kitchen: null, report: null };
@@ -110,7 +110,9 @@ test('visual regression: kitchen home @1440 and @390 match baselines (or seed + 
     PNGmod = (await import('pngjs')).PNG;
     pixelmatch = (await import('pixelmatch')).default;
   } catch { return t.skip('pixelmatch/pngjs not installed'); }
+  if (!existsSync(CLI)) return t.skip(`elementor-ultra cli not found (set EXJSX_ULTRA_CLI): ${CLI}`);
   mkdirSync(BASE, { recursive: true });
+  const port = new URL(WP_URL).port || '80';   // baselines are stack-specific (fixture media differs)
   const shot = (out, w) => execFileSync('node', [CLI, 'shot', `${WP_URL}/exjsx-k-home/`, out, String(w)], { encoding: 'utf8', timeout: 120000 });
   const read = (p) => PNGmod.sync.read(readFileSync(p));
   const diffRatio = (a, b) => {
@@ -120,7 +122,7 @@ test('visual regression: kitchen home @1440 and @390 match baselines (or seed + 
     return n / (a.width * a.height);
   };
   for (const w of [1440, 390]) {
-    const baseline = join(BASE, `exjsx-k-home@${w}.png`);
+    const baseline = join(BASE, `exjsx-k-home@${w}@${port}.png`);
     const cur = join(mkdtempSync(join(tmpdir(), 'exjsx-shot-')), `cur${w}.png`);
     shot(cur, w);
     if (!existsSync(baseline)) {
@@ -130,7 +132,7 @@ test('visual regression: kitchen home @1440 and @390 match baselines (or seed + 
       const r = diffRatio(read(cur), read(again));
       assert.ok(r < 0.005, `double-capture determinism @${w}: ${(r * 100).toFixed(3)}% diff`);
       writeFileSync(baseline, readFileSync(cur));
-      t.diagnostic(`baseline seeded: exjsx-k-home@${w}.png`);
+      t.diagnostic(`baseline seeded: exjsx-k-home@${w}@${port}.png`);
     } else {
       const r = diffRatio(read(baseline), read(cur));
       assert.ok(r < 0.005, `@${w}: ${(r * 100).toFixed(3)}% pixels differ from baseline (limit 0.5%) — visual regression`);

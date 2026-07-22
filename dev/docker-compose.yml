@@ -1,0 +1,53 @@
+# exjsx dev stack — a fresh, isolated WordPress for developing/testing elementor-jsx.
+# Self-contained: no bind mounts to external source trees; the elementor-ultra companion
+# plugin is installed from a zip by setup.sh (EXJSX_ULTRA_ZIP).
+name: exjsx-dev
+services:
+  db:
+    image: mysql:8.0
+    container_name: exjsx-dev-db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: wp_exjsx
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpass"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  wordpress:
+    image: wordpress:latest
+    container_name: exjsx-dev-wp
+    depends_on:
+      db: { condition: service_healthy }
+    ports: ["8918:80"]
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: root
+      WORDPRESS_DB_PASSWORD: rootpass
+      WORDPRESS_DB_NAME: wp_exjsx
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_ENVIRONMENT_TYPE','local');
+    volumes:
+      - wpdata:/var/www/html
+
+  wpcli:
+    image: wordpress:cli
+    container_name: exjsx-dev-cli
+    depends_on:
+      wordpress: { condition: service_started }
+    user: "33:33"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: root
+      WORDPRESS_DB_PASSWORD: rootpass
+      WORDPRESS_DB_NAME: wp_exjsx
+    volumes:
+      - wpdata:/var/www/html
+    entrypoint: ["tail", "-f", "/dev/null"]
+
+volumes:
+  dbdata:
+  wpdata:

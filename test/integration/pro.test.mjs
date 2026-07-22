@@ -15,13 +15,11 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execSync } from 'node:child_process';
 import { join } from 'node:path';
-import { enabled, root, WP_URL, wp, dbSnapshot, dbRestore, rest, renderedPage } from './harness.mjs';
+import { enabled, root, WP_URL, wp, dbSnapshot, dbRestore, rest, renderedPage, dbq } from './harness.mjs';
 
 const PW = process.env.EXJSX_IT_PLAYWRIGHT
   || join(root, '..', 'wpos-elementor-toolset', 'packages', 'server', 'node_modules', 'playwright', 'index.mjs');
-const dbq = (sql) => execSync(`docker exec wpos-stack-db sh -c 'mysql -uroot -prootpass wp_wpos -N -e "${sql}" 2>/dev/null'`, { encoding: 'utf8' }).trim();
 
 let proInstalled = false;
 try { proInstalled = enabled && /^elementor-pro,/m.test(wp('plugin', 'list', '--format=csv')); } catch {}
@@ -210,7 +208,7 @@ test('dynamic tags + single template: a real post renders CMS-driven title/image
   const { dyn } = kit;
   // a blog post with a featured image + excerpt
   const postId = wp('post', 'create', '--post_type=post', '--post_status=publish', '--post_title=Dyn E2E Post', '--post_excerpt=Excerpt via dynamic tag.', '--porcelain').trim();
-  wp('post', 'meta', 'update', postId, '_thumbnail_id', '1583');
+  wp('post', 'meta', 'update', postId, '_thumbnail_id', String(process.env.EXJSX_FIXTURE_IMG || 1583));
 
   const site = defineSite({
     name: 'exjsx-cms',
@@ -237,11 +235,12 @@ test('dynamic tags + single template: a real post renders CMS-driven title/image
   assert.match(postHtml, /Excerpt via dynamic tag\./, 'dynamic excerpt');
   assert.match(postHtml, /<img[^>]*wp-content\/uploads/, 'dynamic featured image resolved from _thumbnail_id');
   assert.match(postHtml, /July \d+, \d{4}|20\d\d/, 'dynamic post-date formatted');
-  assert.match(postHtml, /href="http:\/\/localhost:8915[^"]*"[^>]*>[\s\S]{0,20}?Back to site/, 'dynamic site-url link resolved');
+  assert.match(postHtml, new RegExp(`href="${WP_URL.replace(/[/:.]/g, '\\$&')}[^"]*"[^>]*>[\\s\\S]{0,20}?Back to site`), 'dynamic site-url link resolved');
 
-  // the PAGE with site-level tags renders too
+  // the PAGE with site-level tags renders too (site-title resolves to the stack's actual blogname)
+  const blogname = wp('option', 'get', 'blogname').trim();
   const { html } = await renderedPage('exjsx-cms-home');
-  assert.match(html, /<h1[^>]*>[\s\S]{0,40}?WPOS Stack/, 'dynamic site-title on a page');
+  assert.match(html, new RegExp(`<h1[^>]*>[\\s\\S]{0,40}?${blogname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), 'dynamic site-title on a page');
 });
 
 test('collection loop: a blog-index page repeats the item template per post (experiment auto-enabled)', skip, async () => {

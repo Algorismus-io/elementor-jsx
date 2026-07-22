@@ -38,7 +38,7 @@ const Home = () => (
           <text cls="t-cell" bg="#ffffff" pad={12} ta="center" size={13}>Cell {n}</text>
         ))}
       </box>
-      <img src={1583} w="100%" h={180} fit="cover" radius={12} />
+      <img src={Number(process.env.EXJSX_FIXTURE_IMG || 1583)} w="100%" h={180} fit="cover" radius={12} />
       <text href="/exjsx-t-branch/" color={theme.color.primary} weight={600} size={15}>Cross-page link →</text>
       <html raw={'<div id="exjsx-html-probe" style="height:4px"></div>'} />
     </box>

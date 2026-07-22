@@ -70,7 +70,7 @@ test('readback: _elementor_data holds the exact authored structure', skip, () =>
   const link = nodes.find((n) => n.widgetType === 'e-paragraph' && n.settings.link);
   assert.equal(link.settings.link.value.destination.value, '/exjsx-t-branch/', 'cross-page anchor stored');
   const img = nodes.find((n) => n.widgetType === 'e-image');
-  assert.equal(img.settings.image.value.src.value.id.value, 1583, 'attachment id stored');
+  assert.equal(img.settings.image.value.src.value.id.value, Number(process.env.EXJSX_FIXTURE_IMG || 1583), 'attachment id stored');
   const probe = nodes.find((n) => n.widgetType === 'html');
   assert.match(probe.settings.html, /exjsx-html-probe/);
   assert.equal(nodes.filter((n) => n.widgetType === 'e-heading' && JSON.stringify(n.settings).includes('"h3"')).length, 3, 'three h3 card titles');
@@ -164,8 +164,8 @@ test('inline deploy: registry untouched, <style> block delivers raw CSS', skip, 
 });
 
 /* ── 9. restore proof (runs in after(), asserted here via a follow-up check) ── */
-test('harness: snapshot exists so restore CAN run (farmans registry will come back)', skip, () => {
-  // the actual restore runs in after(); this asserts the snapshot was taken
-  const out = execFileSync('docker', ['exec', 'wpos-stack-db', 'ls', '/tmp/exjsx-it-snapshot.sql'], { encoding: 'utf8' });
-  assert.match(out, /exjsx-it-snapshot\.sql/);
+test('harness: snapshot exists so restore CAN run (resident sites will come back)', skip, async () => {
+  // the actual restore runs in after(); this asserts the snapshot was taken (via harness plumbing)
+  const { dbsh } = await import('./harness.mjs');
+  assert.match(dbsh('ls /tmp/exjsx-it-snapshot.sql'), /exjsx-it-snapshot\.sql/);
 });

@@ -34,12 +34,15 @@ const SNAP = '/tmp/exjsx-it-snapshot.sql';
 const wpcli = (process.env.EXJSX_WPCLI || 'wp').split(' ');
 
 export const wp = (...args) => execFileSync(wpcli[0], [...wpcli.slice(1), ...args], { encoding: 'utf8' });
-const dbsh = (cmd) => execSync(`${DB_EXEC} '${cmd}'`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+export const dbsh = (cmd) => execSync(`${DB_EXEC} '${cmd}'`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
 /* Snapshot/restore is WHOLE-DATABASE (--databases --add-drop-database): a plain per-table import
  * does NOT drop tables created DURING the test window (e.g. Pro's wp_e_submissions* made on first
  * submission) — the strays then clash with rolled-back version options and spray migration errors
  * on the next run (field-found). Drop-and-recreate restores the exact snapshot state. */
+/** run SQL against the stack DB, -N (no headers); returns trimmed stdout. */
+export const dbq = (sql) => dbsh(`mysql ${DB_AUTH} ${DB_NAME} -N -e "${sql}" 2>/dev/null`).trim();
+
 export function dbSnapshot() { dbsh(`mysqldump ${DB_AUTH} --databases ${DB_NAME} --add-drop-database > ${SNAP}`); }
 export function dbRestore() {
   dbsh(`mysql ${DB_AUTH} < ${SNAP} && rm -f ${SNAP}`);

@@ -38,7 +38,7 @@ const Home = () => (
       ],
       ctas: [{ text: 'Sign in', href: '/exjsx-k-gamma/' }, { text: 'Start free', href: '/exjsx-k-alpha/' }],
     })}
-    {hero(1583, 'rgba(23,21,31,0.55)', sx({ pad: [110, 24], gap: 14 }), [
+    {hero(Number(process.env.EXJSX_FIXTURE_IMG || 1583), 'rgba(23,21,31,0.55)', sx({ pad: [110, 24], gap: 14 }), [
       heading('h1', 'Kitchen Sink Torture', sx({ color: '#ffffff', size: 58, weight: 800, ta: 'center', lh: 1.05 })),
       para('Every component, one deploy.', sx({ color: 'rgba(255,255,255,0.85)', size: 18, ta: 'center' })),
       button('Explore features', '/exjsx-k-alpha/', sx({ bg: '#7C3AED', color: '#ffffff', radius: 999, pad: [14, 26], weight: 700 })),

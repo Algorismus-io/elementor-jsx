@@ -253,7 +253,9 @@ test('deploy without wp-cli: variables skipped gracefully, pages still deploy', 
 test('audit: overflow@1440+390, single h1, no console errors, no broken/dead artifacts', skip, async (t) => {
   // redeploy v1 so the audited page is the canonical kitchen
   await deployBundle(S.bundle);
-  const cli = join(root, '..', '.claude', 'skills', 'elementor-ultra', 'lib', 'cli.mjs');
+  const cli = process.env.EXJSX_ULTRA_CLI || join(root, '..', '.claude', 'skills', 'elementor-ultra', 'lib', 'cli.mjs');
+  const { existsSync } = await import('node:fs');
+  if (!existsSync(cli)) return t.skip(`elementor-ultra cli not found (set EXJSX_ULTRA_CLI): ${cli}`);
   let out;
   try {
     out = execFileSync('node', [cli, 'audit', `${WP_URL}/exjsx-k-home/`], { encoding: 'utf8', timeout: 120000 });

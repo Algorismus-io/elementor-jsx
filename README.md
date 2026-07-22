@@ -55,6 +55,28 @@ node src/cli.mjs media  manifest.mjs        # hash-cached asset sideloading
 - `src/decompile.mjs` — any V4 tree → editable JSX (dynamic tags, interactions, full fidelity)
 - `types.d.ts` — the typed public API
 
+## Fresh dev environment (one command)
+
+```
+git clone https://github.com/WPCursor/elementor-jsx && cd elementor-jsx && npm install
+EXJSX_ULTRA_ZIP=/path/to/elementor-ultra-mcp.zip sh dev/setup.sh
+npm test                     # 357 offline tests
+EXJSX_IT=1 npm run test:it   # 39 live tests against the fresh stack
+```
+
+`dev/setup.sh` is idempotent: it stands up an isolated docker stack (`exjsx-dev`,
+WordPress + MySQL on :8918), installs Elementor (pinned, default 4.2.0) + the
+elementor-ultra companion plugin (deploy endpoints), fixes mu-plugins perms, seeds
+fixture media, creates an app password, and writes `.env` — including
+`EXJSX_FIXTURE_IMG` (fixture attachment id) and the DB plumbing the integration
+harness uses for snapshot/restore isolation. Optional `.env` extras for the browser
+tiers: `EXJSX_IT_PLAYWRIGHT` (a playwright install) and `EXJSX_ULTRA_CLI` (the
+elementor-ultra cli for audit/screenshots) — those tests skip gracefully without them.
+Visual baselines are keyed per stack port (`test/baselines/*@<port>.png`); a new
+stack seeds its own on first run. Pro tests skip unless elementor-pro is installed
+(drop the zip in via `wp plugin install`, keep it inactive — tests activate it
+inside their snapshot window).
+
 ## Tests = the contract
 
 `npm test` (357 unit, offline) · `EXJSX_IT=1 npm run test:it` (39 live, needs the
