@@ -68,9 +68,13 @@ test('heading: empty heading (no children) → empty string content, still valid
   assert.equal(n.widgetType, 'e-heading');
 });
 
-test('heading: vnode children contribute NOTHING to text (text-only contract)', () => {
-  const n = render(h('h2', {}, 'Only', h('text', {}, 'ignored')));
-  assert.equal(textOf(n), 'Only');
+test('heading: non-inline vnode children THROW (was silently dropped — ate headline words; nebula build)', () => {
+  assert.throws(() => render(h('h2', {}, 'Only', h('text', {}, 'ignored'))), /<text> inside a text intrinsic/);
+});
+
+test('heading: inline <em> vnode child serializes to whitelisted HTML', () => {
+  const n = render(h('h1', {}, 'Ship ', h('em', {}, 'insight'), '.'));
+  assert.equal(textOf(n), 'Ship <em>insight</em>.');
 });
 
 /* ── style props (the sx path) ── */

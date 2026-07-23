@@ -12,9 +12,10 @@
  */
 import {
   node, css, freshId,
-  S, C, N, B, SZ, DIM, M, P0, RAD, BG, GRAD, SHADOW, HUG, AUTO, HTML, LINK, CLS, IMG_ID,
+  S, C, N, B, SZ, DIM, M, PDIM, P0, RAD, BG, GRAD, SHADOW, HUG, AUTO, HTML, LINK, CLS, IMG_ID,
   fx, col, row, grid, sect, heading, para, button, image, textLink, iconChip, faIcon,
 } from './kit.mjs';
+import { mergeTw } from '../tw.mjs';
 
 /* ───────────────────────────── sx: shorthand → atomic props ─────────────────────────────
  * A compact style object maps to the verbose atomic prop envelopes. Numbers are px unless the
@@ -45,30 +46,64 @@ const bgValue = (v) => {
   return { $$type: 'background', value: { color: colorVal(v) } };   // literal solid color
 };
 
+/* Standard CSS property names (kebab or camel) accepted as aliases for the shorthand keys —
+ * models write `padding`/`maxWidth`/`textAlign` unprompted; don't make them learn `pad`/`maxw`/`ta`.
+ * An explicit shorthand key wins over its alias when both appear. */
+const SX_ALIAS = {
+  padding: 'pad', margin: 'm', width: 'w', height: 'h',
+  'max-width': 'maxw', maxWidth: 'maxw', 'min-height': 'minh', minHeight: 'minh',
+  background: 'bg', 'background-color': 'bg', backgroundColor: 'bg',
+  'align-items': 'align', alignItems: 'align', 'justify-content': 'justify', justifyContent: 'justify',
+  'flex-direction': 'dir', flexDirection: 'dir', 'flex-wrap': 'wrap', flexWrap: 'wrap',
+  'text-align': 'ta', textAlign: 'ta', 'font-size': 'size', fontSize: 'size',
+  'font-weight': 'weight', fontWeight: 'weight', 'font-family': 'font', fontFamily: 'font',
+  'line-height': 'lh', lineHeight: 'lh', 'letter-spacing': 'ls', letterSpacing: 'ls',
+  'border-radius': 'radius', borderRadius: 'radius', 'box-shadow': 'shadow', boxShadow: 'shadow',
+  'object-fit': 'fit', objectFit: 'fit', position: 'pos',
+  'grid-template-columns': 'gridCols', gridTemplateColumns: 'gridCols',
+};
+function unalias(o) {
+  let out = null;
+  for (const k of Object.keys(o)) {
+    const a = SX_ALIAS[k];
+    if (!a) continue;
+    out ??= { ...o };
+    if (out[a] === undefined) out[a] = out[k];
+    delete out[k];
+  }
+  return out || o;
+}
+/** 'Npx' → N for keys that take numbers (alias users write CSS-string values). */
+const num = (v) => (typeof v === 'string' ? parseFloat(v) : v);
+/** '96px 24px' → [96, 24] for pad/m ('auto' tokens preserved). */
+const boxVal = (v) => (typeof v === 'string' ? v.trim().split(/\s+/).map((s) => (s === 'auto' ? 'auto' : parseFloat(s))) : v);
+
 export function sx(o = {}) {
+  o = unalias(o);
   const p = {};
   if (o.bg) p.background = Array.isArray(o.bg) ? GRAD(...o.bg) : bgValue(o.bg);
   if (o.grad) p.background = GRAD(...o.grad);
-  if (o.pad != null) p.padding = Array.isArray(o.pad) ? DIM(...o.pad) : DIM(o.pad);
-  if (o.m != null) p.margin = Array.isArray(o.m) ? M(...o.m) : M(o.m);
+  // object form {t,r,b,l} = PARTIAL sides — unset sides inherit (axis spacing in responsive variants)
+  if (o.pad != null) { const v = boxVal(o.pad); p.padding = Array.isArray(v) ? DIM(...v) : typeof v === 'object' ? PDIM(v) : DIM(v); }
+  if (o.m != null) { const v = boxVal(o.m); p.margin = Array.isArray(v) ? M(...v) : typeof v === 'object' ? PDIM(v) : M(v); }
   if (o.center) p.margin = M(0, 'auto');
-  if (o.radius != null) p['border-radius'] = RAD(o.radius);
-  if (o.gap != null) p.gap = SZ(o.gap);
+  if (o.radius != null) p['border-radius'] = RAD(num(o.radius));
+  if (o.gap != null) p.gap = SZ(num(o.gap));
   if (o.w != null) p.width = width(o.w);
-  if (o.maxw != null) p['max-width'] = SZ(o.maxw);
-  if (o.minh != null) p['min-height'] = SZ(o.minh);
+  if (o.maxw != null) p['max-width'] = SZ(num(o.maxw));
+  if (o.minh != null) p['min-height'] = SZ(num(o.minh));
   if (o.h != null) p.height = width(o.h);
   if (o.align) p['align-items'] = S(o.align);
   if (o.justify) p['justify-content'] = S(o.justify);
   if (o.dir) p['flex-direction'] = S(o.dir);
   if (o.wrap) p['flex-wrap'] = S(o.wrap === true ? 'wrap' : o.wrap);
   if (o.color) p.color = colorVal(o.color);
-  if (o.size != null) p['font-size'] = SZ(o.size);
+  if (o.size != null) p['font-size'] = SZ(num(o.size));
   if (o.weight != null) p['font-weight'] = S(String(o.weight));
   if (o.font) p['font-family'] = isEnv(o.font) ? o.font : S(o.font);
   if (o.ta) p['text-align'] = S({ left: 'start', right: 'end' }[o.ta] || o.ta);
-  if (o.lh != null) p['line-height'] = SZ(o.lh, typeof o.lh === 'number' && o.lh <= 4 ? 'em' : 'px');
-  if (o.ls != null) p['letter-spacing'] = SZ(o.ls, 'em');
+  if (o.lh != null) { const v = num(o.lh); p['line-height'] = SZ(v, typeof v === 'number' && v <= 4 ? 'em' : 'px'); }
+  if (o.ls != null) p['letter-spacing'] = SZ(num(o.ls), 'em');
   if (o.span != null) p['grid-column'] = { $$type: 'span', value: o.span };
   if (o.flex != null) p.flex = FLEX(o.flex);
   if (o.display) p.display = S(o.display);
@@ -96,7 +131,7 @@ function ensureRowChild(ch) {
 /* box: the workhorse — one call replaces col({…verbose props}) + a trailing css(node,'…raw…').
  * `dir:'row'` for a row; `raw` for any CSS the sx map doesn't cover (gradients-on-text, grid spans…). */
 export function box(o = {}, ch = []) {
-  const { raw, dir, tag, ...rest } = o;
+  const { raw, dir, tag, ...rest } = mergeTw(o);
   if (dir === 'row') ch.forEach(ensureRowChild);
   const props = sx(rest);
   const n = tag ? sect(tag, props, ch) : (dir === 'row' ? row(props, ch) : col(props, ch));
@@ -108,7 +143,7 @@ export function box(o = {}, ch = []) {
  * caught by the elementor-jsx test suite). Responsive keys (_t/_m from tablet/mobile) go to
  * their own variants, not into desktop props. */
 export function styled(n, o = {}) {
-  const { raw, ...rest } = o;
+  const { raw, ...rest } = mergeTw(o);
   const { _t, _m, ...deskP } = sx(rest);
   let sid = Object.keys(n.styles || {})[0];
   if (!sid && (Object.keys(deskP).length || _t || _m)) {

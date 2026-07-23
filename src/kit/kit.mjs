@@ -55,6 +55,21 @@ export const M = (t, r = t, b = t, l = r) => ({
   $$type: 'dimensions',
   value: { 'block-start': side(t), 'inline-end': side(r), 'block-end': side(b), 'inline-start': side(l) },
 });
+/**
+ * PARTIAL dimensions: only the given sides are emitted; unset sides inherit (base breakpoint /
+ * element default). Live-verified 2026-07-23 (:8915 dry-run + rendered CSS): a partial envelope
+ * validates AND renders per-side (`padding-block-start` alone, `margin-inline: auto` on mobile).
+ * This is what makes axis spacing (`py-16`, `mx-auto`) atomic inside responsive variants.
+ */
+export const PDIM = ({ t, r, b, l }) => ({
+  $$type: 'dimensions',
+  value: {
+    ...(t !== undefined ? { 'block-start': side(t) } : {}),
+    ...(r !== undefined ? { 'inline-end': side(r) } : {}),
+    ...(b !== undefined ? { 'block-end': side(b) } : {}),
+    ...(l !== undefined ? { 'inline-start': side(l) } : {}),
+  },
+});
 export const RAD = (r) => ({
   $$type: 'border-radius',
   value: { 'start-start': SZ(r), 'start-end': SZ(r), 'end-end': SZ(r), 'end-start': SZ(r) },

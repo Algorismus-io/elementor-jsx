@@ -27,6 +27,7 @@ export default defineSite({
     node: (
       <section pad={[96, 24]} bg={theme.color.primary}>
         <h1 animate={{ effect: 'fade', trigger: 'load' }} color="#fff" size={56}>Hello</h1>
+        <text tw="text-lg leading-relaxed max-w-xl text-white max-md:text-[15px]">Tailwind subset works too.</text>
         {loopGrid({ source: 'post', perPage: 3 }, [/* dyn.postTitle() … */])}
       </section>
     ),
@@ -48,7 +49,13 @@ node src/cli.mjs media  manifest.mjs        # hash-cached asset sideloading
 - `src/kit/` — **the canonical authoring kit** (typed envelopes, every atomic element,
   forms, tabs, video, dynamic tags, loops, interactions, `assertTree` shift-left gates).
   The elementor-ultra skill's old `lib/kit*.mjs` paths are re-export shims of these files.
-- `src/runtime.mjs` — JSX render engine (theme context, intrinsics, kit-node mixing)
+- `src/runtime.mjs` — JSX render engine (theme context, intrinsics, kit-node mixing).
+  Intrinsic tags: `box`/`div`/`row`/`col`/`section` (containers), `h1`–`h4`/`heading`,
+  `text`/`p` (add `href` for a real anchor — there is no `<a>`/`<button>`), `img`, `html`.
+- `src/tw.mjs` — Tailwind-subset `tw=""` prop (`tw="flex flex-col py-24 px-6 gap-8 bg-[#0A2230]"`),
+  desktop-first (`max-lg:` → tablet, `max-md:` → mobile); plus standard CSS property-name
+  aliases in sx (`padding`, `maxWidth`, `textAlign`, …). In-distribution authoring for
+  models: no skill docs needed to write valid styles. Unknown utilities throw at compile.
 - `src/compile.mjs` — site → bundle (id normalization, class dedup, theme parts, carriers)
 - `src/deploy.mjs` — one-shot deploy (variables + registry + pages + parts + SEO runtime),
   version-adaptive (4.1↔4.2), idempotent, registry-namespace-owning

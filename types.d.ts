@@ -33,12 +33,16 @@ export interface AnimateOptions {
   replay?: boolean;
 }
 
-/** The sx shorthand — every key maps to a verified atomic envelope (see unit/sx.test.mjs). */
+/** The sx shorthand — every key maps to a verified atomic envelope (see unit/sx.test.mjs).
+ * Standard CSS property names (kebab or camelCase: `padding`, `maxWidth`, `textAlign`, …) are
+ * accepted as aliases for these keys, with CSS-string values parsed (`padding: '96px 24px'`). */
 export interface SxProps {
   bg?: string | [angle: number, from: string, to: string] | Envelope;
   grad?: [angle: number, from: string, to: string];
-  pad?: number | number[];
-  m?: number | (number | 'auto')[];
+  /** number (uniform) | [v,h] / [t,r,b,l] | CSS string '96px 24px' | PARTIAL sides {t,r,b,l} —
+   * partial emits only the given sides (unset sides inherit; safe in tablet/mobile variants). */
+  pad?: number | number[] | string | { t?: number; r?: number; b?: number; l?: number };
+  m?: number | (number | 'auto')[] | string | { t?: number | 'auto'; r?: number | 'auto'; b?: number | 'auto'; l?: number | 'auto' };
   center?: boolean;
   radius?: number;
   gap?: number;
@@ -72,6 +76,10 @@ export interface SxProps {
 
 /** Intrinsic JSX props = sx shorthand + the specials. */
 export interface IntrinsicProps extends SxProps {
+  /** Tailwind-subset utility string (desktop-first: base = desktop, max-lg: = tablet,
+   * max-md: = mobile). Expands to sx shorthand; explicit sx props win on conflict.
+   * Unknown utilities and palette color names throw at compile time (see src/tw.mjs). */
+  tw?: string;
   tag?: string;
   raw?: string;                       // custom CSS (renders via global classes; --inline emits a <style>)
   href?: string | DynEnvelope;

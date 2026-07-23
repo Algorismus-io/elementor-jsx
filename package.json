@@ -29,6 +29,7 @@
     "./runtime": "./src/runtime.mjs",
     "./theme": "./src/theme.mjs",
     "./compile": "./src/compile.mjs",
+    "./tw": "./src/tw.mjs",
     "./deploy": "./src/deploy.mjs",
     "./decompile": "./src/decompile.mjs",
     "./media": "./src/media.mjs",

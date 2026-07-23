@@ -10,6 +10,7 @@
  */
 import { box, sx, styled, h2 as kh2, h3 as kh3, txt as ktxt } from './kit/kit-components.mjs';
 import { heading, para, image, imageUrl, node, LINK, interact } from './kit/kit.mjs';
+import { mergeTw } from './tw.mjs';
 
 export const Fragment = Symbol('exjsx.Fragment');
 
@@ -24,7 +25,19 @@ export const useTheme = () => CTX.theme;
 export const useCtx = () => CTX;
 
 const isKitNode = (x) => x && typeof x === 'object' && typeof x.elType === 'string';
-const textOf = (children) => children.map((c) => (typeof c === 'string' || typeof c === 'number' ? String(c) : '')).join('');
+/* Inline vnodes inside text intrinsics serialize to the html-v3 whitelisted tags (the <em> accent
+ * recipe: `<h1 raw="& em {…}">Ship <em>insight</em></h1>`). Anything else THROWS — it used to be
+ * silently dropped, which ate the word from the headline (found by the nebula showcase build). */
+const INLINE_TAGS = new Set(['em', 'strong', 'br']);
+const textOf = (children) => children.map((c) => {
+  if (typeof c === 'string' || typeof c === 'number') return String(c);
+  if (c?.$$v && INLINE_TAGS.has(c.type)) return c.type === 'br' ? '<br>' : `<${c.type}>${textOf(c.children)}</${c.type}>`;
+  if (c?.$$v) {
+    const name = typeof c.type === 'function' ? c.type.name || 'Component' : c.type;
+    throw new Error(`exjsx: <${name}> inside a text intrinsic — only <em>/<strong>/<br> nest in heading/text (html-v3 whitelist); put other content in a sibling element`);
+  }
+  return '';
+}).join('');
 
 /** Render a vnode (or array/primitive/kit-node) into kit atomic node(s). */
 export function render(vnode) {
@@ -80,11 +93,12 @@ const addGcls = (n, gcls) => {
 /** Intrinsic element types → kit builders. Props are the `sx` shorthand + a few specials. */
 function intrinsic(type, props, children) {
   const kids = () => render(children) || [];
-  const { tag, dir, raw, href, id, alt, cls, gcls, dyn: dynTag, animate, ...style } = props;
+  // tw="px-6 flex …" (Tailwind subset) expands to sx shorthand first; explicit props win.
+  const { tag, dir, raw, href, id, alt, cls, gcls, dyn: dynTag, animate, ...style } = mergeTw(props);
   // animate={{effect,trigger,...}} (or an array) → motion interactions on the built node
   const withFx = (n) => (animate ? interact(n, animate) : n);
   switch (type) {
-    case 'box': case 'col': case 'row': case 'section': {
+    case 'box': case 'div': case 'col': case 'row': case 'section': {
       const b = box({ ...style, raw, dir: type === 'row' ? 'row' : dir, tag: type === 'section' ? 'section' : tag }, kids());
       if (id) b.settings._cssid = { $$type: 'string', value: id };
       if (href) b.settings.link = LINK(href);   // container-level link (cross-page nav chips, clickable cards)
@@ -117,7 +131,11 @@ function intrinsic(type, props, children) {
       return withFx(addGcls(markCls(im, cls), gcls));
     }
     default:
-      throw new Error(`exjsx: unknown intrinsic <${type}>`);
+      throw new Error(
+        `exjsx: unknown intrinsic <${type}> — valid: box|div|row|col|section (containers), ` +
+          `h1|h2|h3|h4|heading, text|p, img, html. No <button>/<a>: use <text href="…"> ` +
+          `(renders a real anchor) or the kit button() helper; no <span>: use raw CSS accents.`,
+      );
   }
 }
 
