@@ -69,11 +69,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/itshahmir/elementor-jsx.git"
+    "url": "git+https://github.com/Algorismus-io/elementor-jsx.git"
   },
   "bugs": {
-    "url": "https://github.com/itshahmir/elementor-jsx/issues"
+    "url": "https://github.com/Algorismus-io/elementor-jsx/issues"
   },
-  "homepage": "https://github.com/itshahmir/elementor-jsx#readme",
+  "homepage": "https://github.com/Algorismus-io/elementor-jsx#readme",
   "author": "Algorismus <shahmir@algorismus.io> (https://algorismus.io)"
 }

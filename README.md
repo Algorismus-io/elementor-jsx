@@ -13,7 +13,7 @@ trademark; this is an independent compiler that targets their page format.
 ## Quickstart
 
 Requirements: Node ≥ 18 · a WordPress site with **Elementor ≥ 4.1.4** (V4 atomic
-experiments on) and the **[elementor-ultra companion plugin](https://github.com/itshahmir/elementor-ultra-mcp)** (ships the deploy/validate
+experiments on) and the **[elementor-ultra companion plugin](https://github.com/Algorismus-io/elementor-ultra-mcp)** (ships the deploy/validate
 REST endpoints — zip in the GitHub release, source in that repo) · an [application password](https://wordpress.org/documentation/article/application-passwords/).
 
 ```sh
@@ -100,7 +100,7 @@ npx exjsx media manifest.mjs        # hash-cached asset sideloading
 ## Fresh dev environment (one command)
 
 ```
-git clone https://github.com/itshahmir/elementor-jsx && cd elementor-jsx && npm install
+git clone https://github.com/Algorismus-io/elementor-jsx && cd elementor-jsx && npm install
 EXJSX_ULTRA_ZIP=/path/to/elementor-ultra-mcp.zip sh dev/setup.sh
 npm test                     # 522 offline tests
 EXJSX_IT=1 npm run test:it   # 39 live tests against the fresh stack
@@ -130,5 +130,5 @@ ships untested.
 ## License
 
 [MIT](LICENSE) © 2026 [Algorismus](https://algorismus.io). Free forever — the whole stack is open source:
-this compiler/CLI/kit (MIT), the [Elementor Ultra MCP server](https://github.com/itshahmir/elementor-ultra-mcp)
+this compiler/CLI/kit (MIT), the [Elementor Ultra MCP server](https://github.com/Algorismus-io/elementor-ultra-mcp)
 (MIT) and its companion WordPress plugin (GPL-2.0-or-later).
