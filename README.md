@@ -1,14 +1,26 @@
 # elementor-jsx
 
-**Write small JSX components. Compile them to native Elementor pages. Deploy over REST.**
+**The build layer for AI agents that ship Elementor sites.**
 
-React-level JSX → Elementor V4 compiler + one-shot deployer. Full Elementor catalog
-parity (atomic elements, theme parts, forms, loops, dynamic tags, interactions, SEO),
-certified on Elementor **4.1.4 → 4.2.1** (version adapters translate prop-format changes
-per version) by a **522-test** suite that runs against a real WordPress stack.
+Point an agent at Elementor's `_elementor_data` and it emits a 4,000-line JSON blob nobody
+can review — and it re-emits the whole thing on every change, throwing away edits. elementor-jsx
+is the layer in between: the agent writes **small typed JSX components**, the compiler emits
+**native Elementor V4 JSON**, and every run is a **git diff you approve** instead of JSON you audit.
 
-MIT licensed. Not affiliated with or endorsed by Elementor Ltd — "Elementor" is their
-trademark; this is an independent compiler that targets their page format.
+Built agent-first — typed props fail at build time, an authoritative server-side validator rejects
+bad trees before they ever save, and MCP tools give an agent a real API instead of a blank file.
+Humans get the same ergonomics; the design center is the agent.
+
+React-level JSX → Elementor V4 compiler + one-shot deployer. Full Elementor catalog parity (atomic
+elements, theme parts, forms, loops, dynamic tags, interactions, SEO), certified on Elementor
+**4.1.4 → 4.2.1** (version adapters translate prop-format changes per version) by a **522-test**
+suite that runs against a real WordPress stack.
+
+Pairs with the [Elementor Ultra MCP server](https://github.com/Algorismus-io/elementor-ultra-mcp)
+(the agent's ~90-tool control surface) and the [one-command installer](https://github.com/Algorismus-io/create-elementor-ultra).
+
+MIT licensed. Not affiliated with or endorsed by Elementor Ltd — "Elementor" is their trademark;
+this is an independent compiler that targets their page format.
 
 ## Quickstart
 
@@ -28,7 +40,11 @@ That's it — the page is live, native, and editable in the Elementor editor. Re
 deploy any time: it's idempotent, and drift hashes protect pages someone hand-edited
 in the editor (`--force` to overwrite deliberately).
 
-## Authoring
+## Authoring — by an agent or by you
+
+The same source works whether an agent generates it over MCP or you hand-write it. An agent tends
+to compose the small typed components below and let the compiler + server validation catch mistakes;
+the result is a diff you review, not a JSON tree you trust on faith.
 
 ```jsx
 import { defineSite } from 'elementor-jsx';

@@ -2,7 +2,7 @@
   "name": "@algorismus/elementor-jsx",
   "version": "1.1.0",
   "type": "module",
-  "description": "JSX -> Elementor V4 compiler, deployer and CLI. Write small typed components, compile to native Elementor pages (atomic elements, theme parts, forms, loops, dynamic tags), deploy over REST with authoritative server-side validation, drift protection and version adapters. Certified on Elementor 4.1.4-4.2.1 by a 520-test suite.",
+  "description": "The build layer that lets AI agents ship Elementor sites like software. Agents write small typed JSX components instead of 4,000-line _elementor_data blobs; the compiler emits native Elementor V4 JSON and deploys it over REST with authoritative server-side validation, drift protection and version adapters. Every run is a git diff you review, not JSON you audit. Certified on Elementor 4.1.4-4.2.1 by a 522-test suite.",
   "bin": {
     "exjsx": "./src/cli.mjs"
   },
@@ -57,14 +57,17 @@
     "node": ">=18"
   },
   "keywords": [
+    "ai-agents",
+    "agent-native",
+    "mcp",
+    "llm",
     "elementor",
     "wordpress",
     "jsx",
     "compiler",
-    "site-builder",
-    "mcp",
-    "ai-agents",
+    "code-generation",
     "page-builder",
+    "site-builder",
     "cli"
   ],
   "repository": {
