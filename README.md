@@ -13,8 +13,8 @@ trademark; this is an independent compiler that targets their page format.
 ## Quickstart
 
 Requirements: Node ≥ 18 · a WordPress site with **Elementor ≥ 4.1.4** (V4 atomic
-experiments on) and the **elementor-ultra companion plugin** (ships the deploy/validate
-REST endpoints — zip in the GitHub release) · an [application password](https://wordpress.org/documentation/article/application-passwords/).
+experiments on) and the **[elementor-ultra companion plugin](https://github.com/itshahmir/elementor-ultra-mcp)** (ships the deploy/validate
+REST endpoints — zip in the GitHub release, source in that repo) · an [application password](https://wordpress.org/documentation/article/application-passwords/).
 
 ```sh
 npm i -D elementor-jsx
@@ -129,5 +129,6 @@ ships untested.
 
 ## License
 
-[MIT](LICENSE) © 2026 [Algorismus](https://algorismus.io). Free forever — the compiler,
-CLI, kit and companion plugin are all open source.
+[MIT](LICENSE) © 2026 [Algorismus](https://algorismus.io). Free forever — the whole stack is open source:
+this compiler/CLI/kit (MIT), the [Elementor Ultra MCP server](https://github.com/itshahmir/elementor-ultra-mcp)
+(MIT) and its companion WordPress plugin (GPL-2.0-or-later).
