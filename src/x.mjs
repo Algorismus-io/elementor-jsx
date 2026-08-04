@@ -25,7 +25,7 @@ export {
 } from './kit/kit.mjs';
 
 export {
-  FLEX, sx, box, styled, bindClass, h2, h3, txt, eyebrow, accentHeading, sectionHeader,
+  FLEX, sx, bgImage, box, styled, bindClass, h2, h3, txt, eyebrow, accentHeading, sectionHeader,
   section, card, bento, cardGrid, stat, step, chip, logoStrip, testimonial, footer, ctaBand,
   navBar, browserMock, barChart, lineChart, donut, chatMock
 } from './kit/kit-components.mjs';

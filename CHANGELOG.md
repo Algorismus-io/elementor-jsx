@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0 — 2026-08-05
+
+New styling capability + footgun fixes (from field runs):
+- **Container background images**: `bgImage` (URL / attachment id / envelope) + `bgOpts`
+  ({size, position, repeat, attachment}) emit a validated `background-image-overlay` — a
+  photo-behind-text hero is now reachable through the compiler (previously `bg={url}` dropped).
+- **`sx={{…}}` as a prop is respected**, merged as a shorthand object, instead of being silently
+  dropped (the React/MUI reflex). Outer props win over the sx object.
+- **`zIndex` / `z` shorthand** → `z-index` number envelope (previously only reachable via `raw`).
+
 ## 1.1.3 — 2026-08-05
 
 - **`border={number}` is a width, not a color.** A bare number used to be read as the border color,

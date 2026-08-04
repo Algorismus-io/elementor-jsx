@@ -93,6 +93,11 @@ const CASES = [
     { 'border-width': SZ(2), 'border-color': C('#ccc'), 'border-style': S('solid') }],
   ['borderColor alone → color + 1px solid', { borderColor: '#E4E9DC' },
     { 'border-color': C('#E4E9DC'), 'border-width': SZ(1), 'border-style': S('solid') }],
+  // sx={{…}} as a prop merges as shorthand (React/MUI reflex) instead of silently dropping
+  ['sx prop merges shorthand', { sx: { gap: 8 }, pad: 4 },
+    { gap: SZ(8), padding: DIM(4) }],
+  ['zIndex → z-index number', { zIndex: 5 }, { 'z-index': { $$type: 'number', value: 5 } }],
+  ['z shorthand → z-index number', { z: 3 }, { 'z-index': { $$type: 'number', value: 3 } }],
 ];
 
 for (const [name, input, expected] of CASES) {
@@ -145,4 +150,27 @@ test('sx: zero values are not dropped (pad:0, gap:0, size:0, ls:0 must emit)', (
 test('FLEX: composite shape (flexGrow/flexShrink/flexBasis) with auto basis', () => {
   assert.deepEqual(FLEX(1), { $$type: 'flex', value: { flexGrow: N(1), flexShrink: N(1), flexBasis: SZ(0) } });
   assert.deepEqual(FLEX(2, 0, 'auto').value.flexBasis, AUTO);
+});
+
+test('sx: bgImage(url) → background-image-overlay envelope (validated live)', () => {
+  const out = sx({ bgImage: 'https://x.test/hero.jpg' });
+  assert.equal(out.background.$$type, 'background');
+  const overlays = out.background.value['background-overlay'].value;
+  assert.equal(overlays[0].$$type, 'background-image-overlay');
+  assert.equal(overlays[0].value.image.value.src.value.url.value, 'https://x.test/hero.jpg');
+  assert.equal(overlays[0].value.size.value, 'cover');
+});
+
+test('sx: bgImage(attachmentId) uses image-attachment-id src', () => {
+  const out = sx({ bgImage: 42 });
+  const src = out.background.value['background-overlay'].value[0].value.image.value.src.value;
+  assert.equal(src.id.value, 42);
+});
+
+test('sx: bgImage with bgOpts overrides size/position/repeat', () => {
+  const out = sx({ bgImage: 'https://x.test/h.jpg', bgOpts: { size: 'contain', position: 'top left', repeat: 'repeat' } });
+  const ov = out.background.value['background-overlay'].value[0].value;
+  assert.equal(ov.size.value, 'contain');
+  assert.equal(ov.position.value, 'top left');
+  assert.equal(ov.repeat.value, 'repeat');
 });

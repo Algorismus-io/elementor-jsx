@@ -12,9 +12,33 @@
  */
 import {
   node, css, freshId,
-  S, C, N, B, SZ, DIM, M, PDIM, P0, RAD, BG, GRAD, SHADOW, HUG, AUTO, HTML, LINK, CLS, IMG_ID,
+  S, C, N, B, SZ, DIM, M, PDIM, P0, RAD, BG, GRAD, SHADOW, HUG, AUTO, HTML, LINK, CLS, IMG_ID, IMG_URL,
   fx, col, row, grid, sect, heading, para, button, image, textLink, iconChip, faIcon,
 } from './kit.mjs';
+
+/** Atomic container background IMAGE. Accepts a URL (string), an attachment id (number), or a
+ * prebuilt image envelope, plus optional {color, size, position, repeat, attachment}. Emits the
+ * $$type:'background' envelope with a background-image-overlay (validated against the live plugin). */
+export function bgImage(src, { color, size = 'cover', position = 'center center', repeat = 'no-repeat', attachment } = {}) {
+  const img = typeof src === 'string' ? IMG_URL(src) : typeof src === 'number' ? IMG_ID(src) : src;
+  const overlay = {
+    $$type: 'background-image-overlay',
+    value: {
+      image: img,
+      size: S(size),
+      position: S(position),
+      repeat: S(repeat),
+      ...(attachment ? { attachment: S(attachment) } : {}),
+    },
+  };
+  return {
+    $$type: 'background',
+    value: {
+      ...(color ? { color: C(color) } : {}),
+      'background-overlay': { $$type: 'background-overlay', value: [overlay] },
+    },
+  };
+}
 import { mergeTw } from '../tw.mjs';
 
 /* ───────────────────────────── sx: shorthand → atomic props ─────────────────────────────
@@ -79,10 +103,16 @@ const num = (v) => (typeof v === 'string' ? parseFloat(v) : v);
 const boxVal = (v) => (typeof v === 'string' ? v.trim().split(/\s+/).map((s) => (s === 'auto' ? 'auto' : parseFloat(s))) : v);
 
 export function sx(o = {}) {
+  // sx={{…}} as a prop: a nested shorthand object, merged in (React/MUI users reach for `sx` — it
+  // used to be silently dropped). Its keys use the SAME shorthand vocabulary; outer keys win.
+  if (o.sx && typeof o.sx === 'object') { const { sx: inner, ...rest } = o; o = { ...inner, ...rest }; }
   o = unalias(o);
   const p = {};
-  if (o.bg) p.background = Array.isArray(o.bg) ? GRAD(...o.bg) : bgValue(o.bg);
+  // bgImage: URL string / attachment id / prebuilt envelope → container background image
+  if (o.bgImage != null) p.background = bgImage(o.bgImage, o.bgOpts);
+  else if (o.bg) p.background = Array.isArray(o.bg) ? GRAD(...o.bg) : bgValue(o.bg);
   if (o.grad) p.background = GRAD(...o.grad);
+  if (o.zIndex != null || o.z != null) p['z-index'] = N(num(o.zIndex ?? o.z));
   // object form {t,r,b,l} = PARTIAL sides — unset sides inherit (axis spacing in responsive variants)
   if (o.pad != null) { const v = boxVal(o.pad); p.padding = Array.isArray(v) ? DIM(...v) : typeof v === 'object' ? PDIM(v) : DIM(v); }
   if (o.m != null) { const v = boxVal(o.m); p.margin = Array.isArray(v) ? M(...v) : typeof v === 'object' ? PDIM(v) : M(v); }
