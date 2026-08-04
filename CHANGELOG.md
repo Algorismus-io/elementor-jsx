@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1 — 2026-08-04
+
+Field-report fixes (a fresh agent building on Windows against Elementor 4.1.5):
+- **Windows paths**: `init`/`decompile` derived the project name via `dir.split('/')`, which
+  doesn't split backslash paths — the whole path became the name and `\n`/`\t` in it injected
+  escapes into the generated theme. Now uses cross-platform `path.basename` + sanitization.
+- **Unstyled text on Elementor 4.1.x**: the default `var` color mode compiles text color/font to
+  variable refs 4.1.x doesn't resolve, so Elementor drops them. The `init` scaffold now defaults
+  to `mode: 'literal'` (renders on every version); opt into `var` for live Class-Manager binding.
+
 ## 1.1.0 — 2026-08-04
 
 First public release, MIT licensed (© Algorismus).
