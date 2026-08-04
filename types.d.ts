@@ -154,4 +154,79 @@ export function defineSite(def: SiteDef): { $$site: true } & SiteDef;
 export function fromData<T>(items: T[], map: (item: T, i: number) => PageDef): PageDef[];
 export function defineTheme(spec: ThemeSpec): Theme;
 export function compileSite(site: { $$site: true }): Record<string, unknown>;
+/** cfg accepts dry/force/wpcli/cli/wpUrl plus only?: string[] (deploy only those slugs; skips all kit writes). */
 export function deployBundle(bundle: Record<string, unknown>, cfg?: Record<string, unknown>): Promise<Record<string, unknown>>;
+export function shouldWriteVariables(bundle: Record<string, unknown>): boolean;
+/** Pure --only planner: filters bundle.pages by derived slug (throws on unknown/empty entries), flags kit skip + registry-lag warning. */
+export function planOnly(bundle: Record<string, unknown>, only?: string[]): { pages: PageDef[]; skipKit: boolean; warnings: string[] };
+/** Read-only bundle formatter (`exjsx inspect`): summary + element tree (or one --el dump) with every custom_css base64-DECODED; never mutates the bundle. */
+export function inspectBundle(bundle: Record<string, unknown>, opts?: { page?: string; el?: string }): string;
+
+/** One conventions violation (`exjsx lint`); severity 'error' fails the lint, 'warn' fails with --strict. */
+export interface LintFinding { rule: string; severity: 'error' | 'warn' | 'info'; where: string; message: string; fix: string }
+/** Conventions check over a compiled bundle (see CONVENTIONS.md — every rule cites the incident it prevents). Pure, offline. */
+export function lintBundle(bundle: Record<string, unknown>): { findings: LintFinding[]; counts: { error: number; warn: number; info: number } };
+export function formatLint(r: { findings: LintFinding[]; counts: { error: number; warn: number; info: number } }): string;
+
+/** fs-project manifest (`exjsx build <dir>`): pages/*.page.jsx = content, parts/<type>.part.jsx = chrome, theme.mjs = tokens. */
+export interface ProjectManifest {
+  dir: string; name: string; themeFile: string | null; configFile: string | null;
+  pages: { file: string; rel: string; dynamic: boolean; param: string | null; slug: string | null }[];
+  parts: { file: string; type: 'header' | 'footer' | 'single' | 'archive' | 'error404' | 'popup' }[];
+}
+/** Scan a project dir; throws ONE aggregated error listing every layout violation with its fix. */
+export function discoverProject(dir: string): ProjectManifest;
+/** Manifest → plain-JS entry module source that assembles defineSite (per-file contract guards name the offending file). */
+export function synthesizeEntry(manifest: ProjectManifest): string;
+
+/** The vnode h()/JSX produces (runtime.mjs h()); render() consumes it. JSX.Element = VNode below,
+ * so component return positions typecheck against the real runtime shape. */
+export interface VNode { $$v: true; type: unknown; props: Record<string, unknown>; children: unknown[] }
+
+/* ── global JSX namespace: editor autocomplete + tsc typecheck of .tsx entries ──
+ * Helper types below are deliberately NOT exported — a .d.ts module may declare
+ * non-exported interfaces consumed only by the `declare global` block. */
+type Children = unknown;
+interface WithChildren { children?: Children }
+/** box|div|row|col|section — container intrinsics (runtime.mjs intrinsic() switch). */
+interface ContainerProps extends IntrinsicProps, WithChildren {}
+/** h1..h4|heading|text|p — text intrinsics; children serialize via textOf (html-v3). */
+interface TextIntrinsicProps extends IntrinsicProps, WithChildren {}
+/** <html raw="…"> — raw HTML widget; raw wins over children when both are given. */
+interface HtmlProps extends IntrinsicProps, WithChildren { raw?: string }
+/** <img> discriminates on src: string = URL image (inline alt supported); number attachment id
+ * or DynEnvelope = id/dynamic image, where alt comes from the attachment's alt_text and passing
+ * an inline alt THROWS at render — hence `alt?: never` on that arm. */
+type ImgProps =
+  | (IntrinsicProps & { src: string; alt?: string })
+  | (Omit<IntrinsicProps, 'alt'> & { src: number | DynEnvelope; alt?: never });
+
+declare global {
+  namespace JSX {
+    type Element = VNode;
+    interface ElementChildrenAttribute { children: {} }
+    /** EXACT runtime intrinsic set — NO index signature: unknown tags and unknown props must be
+     * compile errors, mirroring the render-time throws in runtime.mjs. */
+    interface IntrinsicElements {
+      box: ContainerProps;
+      div: ContainerProps;
+      row: ContainerProps;
+      col: ContainerProps;
+      section: ContainerProps;
+      h1: TextIntrinsicProps;
+      h2: TextIntrinsicProps;
+      h3: TextIntrinsicProps;
+      h4: TextIntrinsicProps;
+      heading: TextIntrinsicProps;
+      text: TextIntrinsicProps;
+      p: TextIntrinsicProps;
+      /** em/strong/br: legal ONLY nested inside heading/text intrinsics (html-v3 whitelist);
+       * top-level use throws at render — the type layer cannot express the nesting restriction. */
+      em: WithChildren;
+      strong: WithChildren;
+      br: {};
+      img: ImgProps;
+      html: HtmlProps;
+    }
+  }
+}

@@ -462,7 +462,9 @@ export const dyn = {
   postId: () => DYN('post-id', 'post'),
   postTerms: (s = {}) => DYN('post-terms', 'post', s),
   featuredImage: () => DYN('post-featured-image', 'post'),
-  customField: (key) => DYN('post-custom-field', 'post', key ? { key } : {}),
+  // arbitrary meta keys go in custom_key (the `key` control is a SELECT of registered keys —
+  // an unlisted key fails Elementor's validator with paragraph: invalid_value)
+  customField: (key) => DYN('post-custom-field', 'post', key ? { key: '', custom_key: key } : {}),
   pageTitle: () => DYN('page-title', 'site'),
   siteTitle: () => DYN('site-title', 'site'),
   siteTagline: () => DYN('site-tagline', 'site'),
@@ -581,7 +583,9 @@ export const interact = (n, list) => {
  * dev experiment `e_pro_collection_loop` (option elementor_experiment-e_pro_collection_loop=active)
  * — the exjsx deploy enables it automatically when a bundle contains loops. */
 export const loopGrid = ({ source = 'post', perPage = 6, layout = {}, item = {} } = {}, children = []) => {
-  if (!['post', 'page'].includes(source)) throw new Error(`loopGrid: source "${source}" — enum is post|page`);
+  // Any registered post type is a valid source (CPTs included); Elementor's PHP dry_run is the
+  // authoritative validator. Guard only the obviously-broken inputs loudly.
+  if (typeof source !== 'string' || !/^[a-z0-9_-]+$/.test(source)) throw new Error(`loopGrid: source "${source}" — pass a post-type slug (post, page, or a registered CPT)`);
   return node('e-collection-loop', {
     settings: { source: S(source), posts_per_page: N(perPage) },
     props: { padding: P0 },

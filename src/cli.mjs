@@ -20,17 +20,28 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compileSite } from './compile.mjs';
-import { deployBundle } from './deploy.mjs';
+import { deployBundle, shouldWriteVariables } from './deploy.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const [cmd, arg, arg2] = process.argv.slice(2);
 
 async function build(entry) {
-  const res = await esbuild.build({
-    entryPoints: [resolve(entry)], bundle: true, write: false, format: 'esm', platform: 'node',
-    jsx: 'transform', jsxFactory: '_jsx', jsxFragment: '_Fragment', inject: [join(__dir, 'jsx-shim.mjs')],
-    packages: 'external', logLevel: 'silent',
-  });
+  // fs-project mode: a DIRECTORY entry is discovered (pages/, parts/, theme.mjs — see
+  // src/project.mjs + CONVENTIONS.md §1) and a defineSite entry is synthesized into tmp.
+  let entryPath = resolve(entry);
+  const { statSync } = await import('node:fs');
+  const isProject = statSync(entryPath).isDirectory();
+  const outDir = isProject ? entryPath : dirname(entryPath);
+  if (isProject) {
+    const { discoverProject, synthesizeEntry } = await import('./project.mjs');
+    const manifest = discoverProject(entryPath);
+    const src = synthesizeEntry(manifest);
+    entryPath = join(mkdtempSync(join(tmpdir(), 'exjsx-p-')), 'site.entry.mjs');
+    writeFileSync(entryPath, src);
+    console.log(`project ${manifest.name}: ${manifest.pages.length} page file(s)${manifest.parts.length ? `, parts: ${manifest.parts.map((p) => p.type).join('+')}` : ''}${manifest.themeFile ? ', theme' : ''}`);
+  }
+  const { buildOptions } = await import('./bundler.mjs');
+  const res = await esbuild.build(buildOptions(entryPath));
   const tmp = join(mkdtempSync(join(tmpdir(), 'exjsx-b-')), 'entry.mjs');
   writeFileSync(tmp, res.outputFiles[0].text);
   const mod = await import(pathToFileURL(tmp).href);
@@ -40,7 +51,7 @@ async function build(entry) {
   // coexist on ONE WordPress + raw CSS renders on free Elementor via a <style> block. See inline.mjs.
   let inlineStats;
   if (process.argv.includes('--inline')) { const { inlineLocal } = await import('./inline.mjs'); inlineStats = inlineLocal(bundle); }
-  const out = (arg2 && !arg2.startsWith('--')) ? arg2 : resolve(dirname(resolve(entry)), `${bundle.name}.bundle.json`);
+  const out = (arg2 && !arg2.startsWith('--')) ? arg2 : resolve(outDir, `${bundle.name}.bundle.json`);
   writeFileSync(out, JSON.stringify(bundle, null, 2));
   console.log(`built ${bundle.name}: ${bundle.pages.length} page(s), ${bundle.variableList.length} variables, ${bundle.fonts.length} fonts`);
   if (inlineStats) console.log(`  inline: ${inlineStats.inlined} styles inlined, ${inlineStats.rawRules} raw rules → <style>, registry emptied (${inlineStats.dropped} classes dropped)`);
@@ -53,20 +64,46 @@ async function build(entry) {
   if (cmd === 'build') { await build(arg); }
   else if (cmd === 'deploy') {
     const dry = process.argv.includes('--dry');
+    const force = process.argv.includes('--force');
+    // --only=a,b OR --only a,b (value = next token, must exist and not be a flag)
+    let only;
+    const onlyEq = process.argv.find((a) => a.startsWith('--only='));
+    if (onlyEq) only = onlyEq.slice('--only='.length).split(',');
+    else {
+      const oi = process.argv.indexOf('--only');
+      if (oi !== -1) {
+        const v = process.argv[oi + 1];
+        if (!v || v.startsWith('--')) throw new Error('--only requires a value: exjsx deploy <bundle> --only <slug[,slug]>');
+        only = v.split(',');
+      }
+    }
     const bundle = JSON.parse(readFileSync(resolve(arg), 'utf8'));
-    const r = await deployBundle(bundle, { dry });
+    const r = await deployBundle(bundle, { dry, force, only });
+    // --only warnings (class-registry lag) surface in BOTH dry and real mode, on stderr
+    for (const w of r.warnings || []) console.error(`WARN: ${w}`);
     if (dry) {
-      console.log(`dry-run — would write ${Object.keys(bundle.variables.data).length} variables + ${bundle.classes.order.length} classes, and:`);
+      // summary-line precedence: --only kit-skip > inline variables rewrite > default
+      if (only) console.log(`dry-run (--only) — kit writes skipped, would deploy ${r.pages.length} page(s):`);
+      else {
+        // a themed --inline bundle still carries populated variables.data — report the actual skip
+        const varMsg = shouldWriteVariables(bundle)
+          ? `${Object.keys(bundle.variables.data).length} variables`
+          : '0 variables (inline — kit untouched)';
+        console.log(`dry-run — would write ${varMsg} + ${bundle.classes.order.length} classes, and:`);
+      }
       r.pages.forEach((p) => console.log(`  ${p.action.toUpperCase().padEnd(6)} "${p.title}" (/${p.slug}/)${p.id ? ` → existing id ${p.id}` : ''}`));
     } else {
-      console.log(`deployed: ${r.variables} variables + ${r.classes} classes (2 kit writes), ${r.pages.length} page(s)`);
+      if (r.kitSkipped) console.log(`deployed (--only): kit skipped, ${r.pages.length} page(s)`);
+      else console.log(`deployed: ${r.variables} variables + ${r.classes} classes (2 kit writes), ${r.pages.length} page(s)`);
       r.pages.forEach((p) => console.log(`  ${p.action} "${p.title}" → id ${p.id} (/${p.slug}/)`));
+      const drifted = r.pages.filter((p) => p.action === 'skipped-drifted');
+      if (drifted.length) console.error(`⚠ ${drifted.length} page(s) SKIPPED (drifted — hand-edited outside exjsx): ${drifted.map((p) => `/${p.slug}/`).join(', ')}. Re-run with --force to overwrite.`);
     }
   } else if (cmd === 'watch') {
     // exjsx watch <entry.jsx> [--deploy] — rebuild on change; optional auto-deploy of the bundle.
     if (!arg) { console.error('usage: exjsx watch <entry.jsx> [--deploy]'); process.exit(2); }
-    const { watch } = await import('node:fs');
-    const dir = dirname(resolve(arg));
+    const { watch, statSync: _st } = await import('node:fs');
+    const dir = _st(resolve(arg)).isDirectory() ? resolve(arg) : dirname(resolve(arg));
     const doDeploy = process.argv.includes('--deploy');
     let running = false, queued = false;
     const rebuild = async () => {
@@ -105,5 +142,77 @@ async function build(entry) {
     writeFileSync(out, src);
     console.log(`decompiled ${base}: ${tree.length ?? '?'} top-level elements → ${src.split('\n').length} lines`);
     console.log(`  ${out}`);
-  } else console.log('usage: exjsx build <entry.jsx> [out.json] [--inline] | deploy <bundle.json> [--dry] | media <manifest.mjs> [map.json] | decompile <tree.json> [out.jsx]');
+  } else if (cmd === 'inspect') {
+    // exjsx inspect <bundle.json> [--page <slug>] [--el <id>] — read-only, offline (no WP creds needed)
+    const usage = () => { console.error('usage: exjsx inspect <bundle.json> [--page <slug>] [--el <id>]'); process.exit(2); };
+    if (!arg || arg.startsWith('--')) usage();
+    const opts = {};
+    for (const flag of ['--page', '--el']) {
+      const i = process.argv.indexOf(flag);
+      if (i === -1) continue;
+      const v = process.argv[i + 1];
+      if (!v || v.startsWith('--')) usage();
+      opts[flag.slice(2)] = v;
+    }
+    const { inspectBundle } = await import('./inspect.mjs');
+    const bundle = JSON.parse(readFileSync(resolve(arg), 'utf8'));
+    console.log(inspectBundle(bundle, opts));
+  } else if (cmd === 'lint') {
+    // exjsx lint <entry.jsx|bundle.json> [--strict] — conventions check (see CONVENTIONS.md).
+    // errors always fail; --strict also fails on warnings (CI gate).
+    if (!arg || arg.startsWith('--')) { console.error('usage: exjsx lint <entry.jsx|bundle.json> [--strict]'); process.exit(2); }
+    const { lintBundle, formatLint } = await import('./lint.mjs');
+    const bundle = arg.endsWith('.json')
+      ? JSON.parse(readFileSync(resolve(arg), 'utf8'))
+      : JSON.parse(readFileSync(await build(arg), 'utf8'));
+    const r = lintBundle(bundle);
+    console.log(formatLint(r));
+    const strict = process.argv.includes('--strict');
+    if (r.counts.error || (strict && r.counts.warn)) process.exit(1);
+  } else if (cmd === 'init') {
+    // exjsx init [dir] — scaffold a minimal fs-project (theme + config + one page + one part).
+    const { mkdirSync, existsSync } = await import('node:fs');
+    const dir = resolve(arg || 'site');
+    if (existsSync(join(dir, 'theme.mjs'))) { console.error(`exjsx init: ${dir}/theme.mjs already exists — refusing to overwrite`); process.exit(2); }
+    mkdirSync(join(dir, 'pages'), { recursive: true });
+    mkdirSync(join(dir, 'parts'), { recursive: true });
+    const name = dir.split('/').filter(Boolean).pop() || 'my-site';
+    writeFileSync(join(dir, 'site.config.mjs'), `export default { name: '${name}' };\n`);
+    writeFileSync(join(dir, 'theme.mjs'), `/** Design tokens — every page receives these as \`theme\`. */
+export default defineTheme({
+  name: '${name}',
+  color: {
+    ink: '#1A1A2E',      // display text
+    primary: '#2563EB',  // links, buttons
+    accent: '#F59E0B',   // highlights
+    paper: '#FAFAF7',    // page background
+    muted: '#5B616E',    // body copy
+    white: '#FFFFFF',
+  },
+  font: { head: 'Fraunces', body: 'Inter' },
+});
+`);
+    writeFileSync(join(dir, 'pages', 'home.page.jsx'), `/** Homepage — slug comes from the filename. */
+export const meta = {
+  title: 'Home',
+  seo: { title: '${name}', description: 'Built with elementor-jsx.' },
+};
+
+export default ({ theme: t }) => (
+  <box tw="flex flex-col w-full items-center" pad={0} bg={t.color.paper}>
+    <section tw="flex flex-col items-center gap-6 w-full max-w-[960px] px-6 py-28 text-center">
+      {fontLoader('Fraunces', [600])}
+      {fontLoader('Inter', [400, 600])}
+      <heading tag="h1" w="100%" size={64} weight={600} font={t.font.head} color={t.color.ink} mobile={{ size: 40 }}>
+        Hello, Elementor.
+      </heading>
+      <text size={17} font={t.font.body} color={t.color.muted} lh={1.65} maxw={520}>
+        This page is compiled from pages/home.page.jsx. Edit it, run the build, deploy, repeat.
+      </text>
+    </section>
+  </box>
+);
+`);
+    console.log(`scaffolded ${dir}/\n  theme.mjs · site.config.mjs · pages/home.page.jsx\n\nnext:\n  exjsx build ${arg || 'site'}\n  WP_URL=… WP_USER=… WP_APP_PASSWORD=… exjsx deploy ${arg || 'site'}/${name}.bundle.json`);
+  } else console.log('usage: exjsx init [dir] | build <entry.jsx|project-dir> [out.json] [--inline] | deploy <bundle.json> [--dry] [--only <slug[,slug]>] [--force] | lint <entry.jsx|bundle.json> [--strict] | media <manifest.mjs> [map.json] | decompile <tree.json> [out.jsx] | inspect <bundle.json> [--page <slug>] [--el <id>]');
 })().catch((e) => { console.error(e.message); process.exit(1); });

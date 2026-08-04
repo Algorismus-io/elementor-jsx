@@ -66,6 +66,27 @@ test('section: renders tag=section semantic container', () => {
   assert.deepEqual(n.settings.tag, S('section'));
 });
 
+test('section: dir row survives the tag branch (sect bypasses row()/col())', () => {
+  // regression: box() used to strip dir before sx, so <section dir="row"> (and tw="flex-row")
+  // silently rendered as a column — Elementor's e-flexbox default.
+  const p = deskProps(render(h('section', { dir: 'row' })));
+  assert.deepEqual(p['flex-direction'], S('row'));
+});
+
+test('section: tw flex-row + max-md:flex-col compile to desktop row / mobile column', () => {
+  const n = render(h('section', { tw: 'flex flex-row gap-16 max-md:flex-col' }));
+  assert.deepEqual(deskProps(n)['flex-direction'], S('row'));
+  const sid = Object.keys(n.styles)[0];
+  const mob = n.styles[sid].variants.find((v) => v.meta.breakpoint === 'mobile');
+  assert.deepEqual(mob.props['flex-direction'], S('column'));
+});
+
+test('box: tag=footer + dir row keeps both', () => {
+  const n = render(h('box', { tag: 'footer', dir: 'row' }));
+  assert.deepEqual(n.settings.tag, S('footer'));
+  assert.deepEqual(deskProps(n)['flex-direction'], S('row'));
+});
+
 test('box: custom tag (header/footer/article)', () => {
   const n = render(h('box', { tag: 'footer' }));
   assert.deepEqual(n.settings.tag, S('footer'));

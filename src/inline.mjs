@@ -5,6 +5,9 @@
  * sites). Enable with `build … --inline`. It does three things (field-found by the batch-conversion tester):
  *  1. Re-inline every shared class as a per-element LOCAL style → the page never grows/prunes the shared
  *     kit; deploy skips the global-class PUT when `classes.order` is empty → zero cross-site clobber.
+ *     Marks the bundle `inline: true` (a plain JSON boolean — it must survive the bundle.json
+ *     stringify/parse round-trip); deploy consults this flag to skip the kit variables write, so an
+ *     inline deploy never overwrites the resident site's _elementor_global_variables.
  *  2. SALT element/style ids per page (djb2(bundle.name)) → Elementor scopes local styles by the generic
  *     `.elementor` (not the page id), so unsalted ids would bleed between coexisting pages.
  *  3. Render every `raw`/`custom_css` declaration as a real `<style>` block. custom_css SILENTLY NO-OPS on
@@ -65,13 +68,21 @@ export function inlineLocal(bundle) {
     if (rawByBp[bp].length) cssText += `@media(${MEDIA[bp]}){${rawByBp[bp].join('')}}`;
   }
   if (cssText && bundle.pages[0]) {
+    // the carrier widget is zero-height but still gets Elementor's DEFAULT 20px widget
+    // bottom-margin — which pushed every inline page down 20px and exposed the theme's body
+    // background as a dark strip at the top (field-found on /discord-safety/). The stylesheet
+    // collapses its own wrapper by data-id.
+    const wid = `erawcss${SALT}`;
     bundle.pages[0].elements.unshift({
-      id: `erawcss${SALT}`, elType: 'widget', widgetType: 'html',
-      settings: { html: `<style id="exjsx-raw-${SALT}">${cssText}</style>` }, styles: {}, elements: [],
+      id: wid, elType: 'widget', widgetType: 'html',
+      settings: { html: `<style id="exjsx-raw-${SALT}">.elementor-element-${wid}{margin:0 !important;height:0;line-height:0;}${cssText}</style>` }, styles: {}, elements: [],
     });
   }
   const dropped = Object.keys(items).length;
   bundle.classes = { items: {}, order: [] };
+  // plain JSON boolean — the deploy verb round-trips the bundle through bundle.json, so the marker
+  // must survive JSON.stringify/parse; deploy consults it to skip the kit variables write.
+  bundle.inline = true;
   bundle.stats = { ...(bundle.stats || {}), inlined, rawRules, sharedClasses: 0 };
   return { inlined, rawRules, dropped };
 }

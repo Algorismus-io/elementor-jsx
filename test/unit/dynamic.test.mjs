@@ -119,8 +119,9 @@ test('loopGrid: canonical 3-level structure — loop{source,per_page} > layout >
   assert.doesNotThrow(() => assertTree([g]));
 });
 
-test('loopGrid: source enum guarded at build', () => {
-  assert.throws(() => loopGrid({ source: 'product' }), /enum is post\|page/);
+test('loopGrid: junk source guarded at build, CPT slugs pass', () => {
+  assert.throws(() => loopGrid({ source: 'Not A Slug!' }), /post-type slug/);
+  assert.equal(loopGrid({ source: 'vf_event' }).settings.source.value, 'vf_event');
 });
 
 test('dynamic content styles like any text (sx props coexist with dyn binding)', () => {

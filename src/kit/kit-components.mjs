@@ -133,7 +133,9 @@ function ensureRowChild(ch) {
 export function box(o = {}, ch = []) {
   const { raw, dir, tag, ...rest } = mergeTw(o);
   if (dir === 'row') ch.forEach(ensureRowChild);
-  const props = sx(rest);
+  // dir stays in the sx input: the tag branch (sect) doesn't route through row()/col(),
+  // so flex-direction must come from the props or <section dir="row"> silently renders as a column.
+  const props = sx(dir ? { ...rest, dir } : rest);
   const n = tag ? sect(tag, props, ch) : (dir === 'row' ? row(props, ch) : col(props, ch));
   if (raw) css(n, raw);
   return n;

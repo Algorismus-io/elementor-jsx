@@ -12,7 +12,10 @@ import { box, sx, styled, h2 as kh2, h3 as kh3, txt as ktxt } from './kit/kit-co
 import { heading, para, image, imageUrl, node, LINK, interact } from './kit/kit.mjs';
 import { mergeTw } from './tw.mjs';
 
-export const Fragment = Symbol('exjsx.Fragment');
+/* Symbol.for, not Symbol: a relative-import entry gets its OWN bundled runtime copy (the cli's
+ * packages:'external' only externalizes bare imports), so <>…</> made by that copy must still
+ * match this module's Fragment when compile.mjs renders — the global registry keeps identity. */
+export const Fragment = Symbol.for('exjsx.Fragment');
 
 /** React.createElement-style factory. children are flattened; null/false/'' dropped. */
 export function h(type, props, ...children) {

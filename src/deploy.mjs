@@ -7,22 +7,53 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { canonicalHash, decideDrift, shortHash } from './drift.mjs';
 
-const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+// opts spread lets drift reads raise maxBuffer (execFileSync defaults to 1 MiB — too small for _elementor_data)
+const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
 
-/* 4.1↔4.2 FORWARD-COMPAT (found by the upgrade rehearsal): Span_Prop_Type changed base class —
- * 4.1.4 validates a NUMBER value ({$$type:'span',value:6}), 4.2.0 a STRING ("span 6"); neither
- * form passes the other's validator. Authors keep writing numbers (span: 6); deploy detects the
- * target's Elementor version and adapts every grid-column/grid-row span in place. */
+/* 4.1↔4.2 FORWARD-COMPAT (found by the upgrade rehearsal + the :8919 fresh-env build): two prop
+ * types changed shape across the boundary — neither form passes the other's validator:
+ *   - Span_Prop_Type: 4.1.4 validates a NUMBER ({$$type:'span',value:6}), 4.2.0 a STRING ("span 6").
+ *   - Font_Family_Prop_Type (NEW in 4.2, key 'font-family'): 4.1.4 takes {$$type:'string'},
+ *     4.2.0 REQUIRES {$$type:'font-family'} — every string-typed font-family 422s as invalid_value.
+ * Authors keep writing the sx forms; deploy detects the target's Elementor version and adapts
+ * every affected prop in place. */
+/* numeric [major,minor,patch] compare — parseFloat can't tell 4.2.0 from 4.2.1, and 4.2.1
+ * renamed the border-radius prop type (field-found on the :8920 clean stack). */
+const verAtLeast = (version, [a, b, c]) => {
+  const [x = 0, y = 0, z = 0] = String(version).split('.').map((n) => parseInt(n, 10) || 0);
+  return x !== a ? x > a : y !== b ? y > b : z >= c;
+};
+
 function adaptSpansForVersion(bundle, version) {
   const major = parseFloat(version) || 0;
+  const radiusV2 = verAtLeast(version, [4, 2, 1]);
   const toTarget = (v) => {
     if (!v || v.$$type !== 'span') return v;
     if (major >= 4.2 && typeof v.value === 'number') return { ...v, value: `span ${v.value}` };
     if (major < 4.2 && typeof v.value === 'string') { const m = /span\s+(\d+)/.exec(v.value); if (m) return { ...v, value: Number(m[1]) }; }
     return v;
   };
-  const walkProps = (props) => { for (const k of ['grid-column', 'grid-row']) if (props?.[k]) props[k] = toTarget(props[k]); };
+  const fontToTarget = (v) => {
+    if (!v || typeof v.value !== 'string') return v;
+    if (major >= 4.2 && v.$$type === 'string') return { ...v, $$type: 'font-family' };
+    if (major < 4.2 && v.$$type === 'font-family') return { ...v, $$type: 'string' };
+    return v;
+  };
+  // 4.2.1 renamed Border_Radius_Prop_Type's key: $$type 'border-radius' → 'border-radius-v2'
+  // (value shape unchanged). Adapt both directions so authored bundles deploy to any target.
+  const radiusToTarget = (v) => {
+    if (!v) return v;
+    if (radiusV2 && v.$$type === 'border-radius') return { ...v, $$type: 'border-radius-v2' };
+    if (!radiusV2 && v.$$type === 'border-radius-v2') return { ...v, $$type: 'border-radius' };
+    return v;
+  };
+  const walkProps = (props) => {
+    for (const k of ['grid-column', 'grid-row']) if (props?.[k]) props[k] = toTarget(props[k]);
+    if (props?.['font-family']) props['font-family'] = fontToTarget(props['font-family']);
+    if (props?.['border-radius']) props['border-radius'] = radiusToTarget(props['border-radius']);
+  };
   const walkStyles = (styles) => { for (const st of Object.values(styles || {})) for (const va of st.variants || []) walkProps(va.props); };
   const walkEls = (ns) => { for (const n of ns || []) { walkStyles(n.styles); walkEls(n.elements); } };
   for (const item of Object.values(bundle.classes?.items || {})) for (const va of item.variants || []) walkProps(va.props);
@@ -31,12 +62,56 @@ function adaptSpansForVersion(bundle, version) {
   return major >= 4.2 ? 'string (4.2+)' : 'number (4.1)';
 }
 
+/* An --inline bundle must NOT touch the target kit's _elementor_global_variables — the kit belongs
+ * to the resident site, and overwriting it clobbers live token bindings. Inline is detected by the
+ * `inline: true` flag (inline.mjs) or, for inline bundle.json files built before the flag existed,
+ * by the numeric stats.inlined that only inline.mjs writes (a hand-crafted bundle carrying
+ * stats.inlined is therefore treated as inline too). Everything else writes — INCLUDING a theme-less
+ * bundle whose variables are the {data:{},watermark:0,version:1} fallback: that write is the
+ * regression guard against the sitewide "Undefined array key watermark" PHP spray, so the decision
+ * must never key off variables.data being empty. */
+export function shouldWriteVariables(bundle) {
+  return !(bundle.inline === true || typeof bundle.stats?.inlined === 'number');
+}
+
+// ONE slug derivation for the whole module: planOnly's matching and the page-loop upsert MUST agree,
+// or --only would filter against a different slug than the deploy writes.
+const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+/* --only planning — PURE (no I/O, never mutates the bundle). Validates the requested slugs against
+ * the bundle BEFORE deployBundle touches wp-cli or REST, so a typo costs zero side effects.
+ * Matching is EXACT against the derived slug (p.slug || slugify(p.title)) — no slugify of the
+ * user's token, no globbing — determinism over convenience. */
+export function planOnly(bundle, only) {
+  if (!only || only.length === 0) return { pages: bundle.pages, skipKit: false, warnings: [] };
+  const wanted = [...new Set(only.map((s) => {
+    const t = String(s).trim();
+    if (!t) throw new Error('--only: empty slug entry — usage: exjsx deploy <bundle> --only <slug[,slug]>');
+    return t;
+  }))];
+  const allSlugs = (bundle.pages || []).map((p) => p.slug || slugify(p.title));
+  const misses = wanted.filter((s) => !allSlugs.includes(s));
+  if (misses.length) throw new Error('--only: unknown slug(s) ' + misses.join(', ') + ' — bundle "' + bundle.name + '" has: ' + allSlugs.join(', '));
+  const set = new Set(wanted);
+  // BUNDLE order, not --only order — deploys stay deterministic regardless of how the flag was typed
+  const pages = (bundle.pages || []).filter((_, i) => set.has(allSlugs[i]));
+  // same emptiness condition that gates the class PUT below: inline bundles (order:[]) and
+  // class-free bundles have no registry to lag, so no warning
+  const warnings = bundle.classes?.order?.length
+    ? ['--only: shared class registry (' + bundle.classes.order.length + ' classes) NOT updated — styles may lag; run a full deploy without --only to sync']
+    : [];
+  return { pages, skipKit: true, warnings };
+}
+
 export async function deployBundle(bundle, cfg = {}) {
+  // --only validation FIRST — an unknown slug must throw before any wp-cli call or fetch
+  const plan = planOnly(bundle, cfg.only);
   const wpcli = (cfg.wpcli || process.env.EXJSX_WPCLI || 'wp').split(' ');
   const cli = cfg.cli || process.env.EXJSX_CLI;
   const wpUrl = cfg.wpUrl || process.env.WP_URL;
   const auth = 'Basic ' + Buffer.from(`${process.env.WP_USER}:${process.env.WP_APP_PASSWORD}`).toString('base64');
   const report = { variables: 0, classes: 0, pages: [] };
+  if (plan.warnings.length) report.warnings = plan.warnings;
 
   // 0) version-adaptive span form (wp-cli; REST-only targets keep the authored form)
   try {
@@ -48,19 +123,31 @@ export async function deployBundle(bundle, cfg = {}) {
   // 1) ONE-SHOT kit write: all variables in a single update_post_meta (no per-token round-trips).
   // Requires wp-cli (EXJSX_WPCLI). GRACEFUL: if wp-cli isn't available (e.g. a REST-only tester setup),
   // skip variables — pages still render via the theme's literal fallback (only LIVE var-binding is lost).
-  const b64 = Buffer.from(JSON.stringify(bundle.variables)).toString('base64');
-  const php = `$k=\\Elementor\\Plugin::$instance->kits_manager->get_active_id(); update_post_meta($k,'_elementor_global_variables', wp_slash(base64_decode('${b64}'))); echo 'vars='.count(json_decode(base64_decode('${b64}'),true)['data']);`;
-  try {
-    const out = sh(wpcli[0], [...wpcli.slice(1), 'eval', php]);
-    report.variables = parseInt((out.match(/vars=(\d+)/) || [])[1] || '0', 10);
-  } catch {
+  // Inline bundles skip this entirely (zero kit writes) — see shouldWriteVariables above.
+  // --only skips ALL kit writes (variables + classes + parts); pages still deploy below. An inline
+  // bundle under --only legitimately reports BOTH kitSkipped and variablesSkipped — additive, not
+  // suppressed. (Note: plain --dry still runs this step — pre-existing, --dry --only does not.)
+  if (plan.skipKit) {
+    report.kitSkipped = '--only: kit writes skipped (variables + classes + parts untouched)';
+  }
+  if (!plan.skipKit && shouldWriteVariables(bundle)) {
+    const b64 = Buffer.from(JSON.stringify(bundle.variables)).toString('base64');
+    const php = `$k=\\Elementor\\Plugin::$instance->kits_manager->get_active_id(); update_post_meta($k,'_elementor_global_variables', wp_slash(base64_decode('${b64}'))); echo 'vars='.count(json_decode(base64_decode('${b64}'),true)['data']);`;
+    try {
+      const out = sh(wpcli[0], [...wpcli.slice(1), 'eval', php]);
+      report.variables = parseInt((out.match(/vars=(\d+)/) || [])[1] || '0', 10);
+    } catch {
+      report.variables = 0;
+      report.variablesSkipped = 'wp-cli unavailable — theme variables not written (pages use literal fallback; set EXJSX_WPCLI for live Class-Manager binding)';
+    }
+  } else if (!shouldWriteVariables(bundle)) {
     report.variables = 0;
-    report.variablesSkipped = 'wp-cli unavailable — theme variables not written (pages use literal fallback; set EXJSX_WPCLI for live Class-Manager binding)';
+    report.variablesSkipped = 'inline bundle — kit _elementor_global_variables untouched (resident site token bindings preserved)';
   }
 
   // 1b) ONE-SHOT class registry write: the WHOLE {items, order} in a single canonical PUT (the endpoint
   // the Class Manager uses — it writes the meta + CPT posts internally). Before pages so class CSS primes.
-  if (bundle.classes?.order?.length && wpUrl) {
+  if (!plan.skipKit && bundle.classes?.order?.length && wpUrl) {
     // Own the namespace: delete classes currently in the kit that this build doesn't declare (orphan
     // cleanup). Single-site-per-kit assumption — for a shared kit, scope by a class-name prefix instead.
     let deleted = [];
@@ -83,7 +170,8 @@ export async function deployBundle(bundle, cfg = {}) {
 
   // 1c) collection loops need the hidden dev experiment `e_pro_collection_loop` — enable it BEFORE
   //     any page save (the validator rejects unregistered element types). wp-cli; no-op without it.
-  const usesLoop = (JSON.stringify(bundle.pages) + JSON.stringify(bundle.parts || [])).includes('"e-collection-loop"');
+  // filtered pages only; parts JSON excluded under --only (parts are not deployed then)
+  const usesLoop = (JSON.stringify(plan.pages) + (plan.skipKit ? '' : JSON.stringify(bundle.parts || []))).includes('"e-collection-loop"');
   if (usesLoop && !cfg.dry) {
     try {
       sh(wpcli[0], [...wpcli.slice(1), 'option', 'update', 'elementor_experiment-e_pro_collection_loop', 'active']);
@@ -93,7 +181,7 @@ export async function deployBundle(bundle, cfg = {}) {
 
   // 1d) SEO runtime — pages carrying `seo` need the tiny mu-plugin that renders _exjsx_seo meta
   //     (WP core emits NO meta description/og tags without an SEO plugin). Idempotent, version-tagged.
-  if (bundle.pages?.some((p) => p.seo) && !cfg.dry) {
+  if (plan.pages?.some((p) => p.seo) && !cfg.dry) {
     const MU = `<?php
 /* exjsx-seo v1 — per-page SEO meta from the _exjsx_seo post meta. Managed by exjsx deploy. */
 add_filter( 'pre_get_document_title', function ( $t ) {
@@ -130,7 +218,6 @@ add_action( 'wp_head', function () {
 
   // 2) pages — IDEMPOTENT upsert by slug (update in place if the slug exists, else create). Deterministic
   //    ids (normalizeIds) mean a re-deploy of unchanged source is a clean no-op update, not a new page.
-  const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   // REST page lookup by slug (no wp-cli) — works against any WordPress with the app password.
   const findPage = async (slug) => {
     try {
@@ -141,10 +228,48 @@ add_action( 'wp_head', function () {
   };
   const jhead = { 'Content-Type': 'application/json', Authorization: auth };
   const eu = (path) => `${wpUrl}/wp-json/elementor-ultra/v1${path}`;
-  for (const p of bundle.pages) {
+  // DRIFT DETECTION (pages only) — requires wp-cli: REST has no arbitrary-meta route (same constraint
+  // as the SEO meta write below). One failed wp-cli call disables the feature for the WHOLE run and
+  // every page then deploys exactly as before the feature existed.
+  let driftEnabled = true;
+  const driftEval = (php) => {
+    if (!driftEnabled) return null;
+    // _elementor_data (base64 through docker stdout) exceeds execFileSync's 1 MiB default maxBuffer
+    try { return sh(wpcli[0], [...wpcli.slice(1), 'eval', php], { maxBuffer: 64 * 1024 * 1024 }); }
+    catch {
+      driftEnabled = false;
+      report.driftCheck = 'wp-cli unavailable — drift detection skipped (hand-edit protection off; set EXJSX_WPCLI)';
+      return null;
+    }
+  };
+  for (const p of plan.pages) {
     const slug = p.slug || slugify(p.title);
     let id = await findPage(slug);
-    if (cfg.dry) { report.pages.push({ title: p.title, slug, id: id || null, action: id ? 'update' : 'create' }); continue; }
+    // pre-check (existing pages only): stamp + live tree in ONE eval; unreadable live data IS drift.
+    let stamped = null, current = null;
+    if (id) {
+      const out = driftEval(`$h=get_post_meta(${id},'_exjsx_hash',true); $d=get_post_meta(${id},'_elementor_data',true); echo 'h='.$h.';d='.base64_encode($d);`);
+      const m = out === null ? null : /h=([^;]*);d=([A-Za-z0-9+/=]*)/.exec(out);
+      if (m) {
+        stamped = m[1] || null;
+        try { current = canonicalHash(Buffer.from(m[2], 'base64').toString('utf8')); } catch { current = null; }
+      }
+    }
+    const drift = driftEnabled && id
+      ? decideDrift({ stamped, current, force: cfg.force })
+      : { proceed: true, drifted: false, reason: 'first-stamp' };
+    if (cfg.dry) {
+      // read-only pre-check in dry mode: NO stamping, NO meta writes of any kind
+      const action = !id ? 'create' : drift.reason === 'drifted-skip' ? 'update (DRIFTED — would skip; use --force)' : 'update';
+      report.pages.push({ title: p.title, slug, id: id || null, action });
+      continue;
+    }
+    if (!drift.proceed) {
+      // loud stderr from deployBundle itself so `watch --deploy` surfaces it too
+      console.error(`⚠ DRIFT: "${p.title}" (/${slug}/, id ${id}) edited outside exjsx — stamped ${shortHash(stamped)} ≠ live ${shortHash(current)}. SKIPPED. Re-run with --force to overwrite, or exjsx decompile the live tree to recover the edits.`);
+      report.pages.push({ title: p.title, id, slug, action: 'skipped-drifted', stamped: shortHash(stamped), current: shortHash(current) });
+      continue;
+    }
     let action = id ? 'updated' : 'created';
     // create the page (companion) if it doesn't exist — pure REST, no toolset server / wp-cli.
     if (!id) {
@@ -169,7 +294,22 @@ add_action( 'wp_head', function () {
         sh(wpcli[0], [...wpcli.slice(1), 'eval', `update_post_meta(${id}, '_exjsx_seo', json_decode(base64_decode('${seoB64}'), true)); echo 'seo=ok';`]);
       } catch { /* reported via seoRuntime */ }
     }
-    report.pages.push({ title: p.title, id, slug, action });
+    // POST-SAVE STAMP from READ-BACK, not from the sent p.elements — /save may normalize the tree
+    // (defaults, id sanitization, span forms per adaptSpansForVersion); read-back stamping makes the
+    // next deploy's clean-compare correct by construction.
+    let stampSource;
+    if (driftEnabled) {
+      let stamp = null;
+      const rb = driftEval(`echo base64_encode(get_post_meta(${id},'_elementor_data',true));`);
+      if (rb !== null) { try { stamp = canonicalHash(Buffer.from(rb.trim(), 'base64').toString('utf8')); } catch { /* fall through to sent */ } }
+      if (!stamp && driftEnabled) { stamp = canonicalHash(p.elements); stampSource = 'sent'; }
+      if (stamp) driftEval(`update_post_meta(${id},'_exjsx_hash','${stamp}'); echo 'stamp=ok';`);
+    }
+    // clean/first-stamp entries keep EXACTLY {title,id,slug,action} — live suites deep-inspect this shape
+    const entry = { title: p.title, id, slug, action };
+    if (drift.drifted) entry.drifted = true;   // forced overwrite — visible, not silent
+    if (stampSource) entry.stampSource = stampSource;
+    report.pages.push(entry);
   }
   // 3) THEME PARTS (header/footer) — Elementor Pro theme-builder templates, deployed via wp-cli
   //    (elementor_library has no REST surface). Recipe (live-verified 4.1.4 + Pro 4.1.0, works on
@@ -177,7 +317,9 @@ add_action( 'wp_head', function () {
   //    _elementor_template_type + elementor_library_type taxonomy + _elementor_conditions meta +
   //    atomic _elementor_data — then the conditions cache MUST be regenerate()d (deleting the
   //    option is NOT enough; without it the part never renders).
-  if (bundle.parts?.length) {
+  //    DRIFT DETECTION IS PAGES-ONLY: theme parts keep their unconditional overwrite (no _exjsx_hash
+  //    stamp, no pre-check) — hand edits to elementor_library posts are NOT protected here.
+  if (!plan.skipKit && bundle.parts?.length) {
     report.parts = [];
     for (const part of bundle.parts) {
       const slug = `exjsx-part-${part.type}-${slugify(bundle.name)}`;

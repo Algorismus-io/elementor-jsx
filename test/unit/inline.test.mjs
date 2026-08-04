@@ -7,7 +7,9 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { compileSite } from '../../src/compile.mjs';
 import { inlineLocal } from '../../src/inline.mjs';
+import { shouldWriteVariables, deployBundle } from '../../src/deploy.mjs';
 import { defineSite } from '../../src/site.mjs';
+import { defineTheme } from '../../src/theme.mjs';
 import { h } from '../../src/runtime.mjs';
 import { resetIds, allNodes, classRefs, findNode } from '../helpers.mjs';
 
@@ -89,4 +91,48 @@ test('inline: stats.sharedClasses reset to 0 (deploy display honesty)', () => {
   const b = buildBundle('s', h('text', { size: 14 }, 'x'));
   inlineLocal(b);
   assert.equal(b.stats.sharedClasses, 0);
+});
+
+const buildThemed = (name, node) => {
+  const theme = defineTheme({ name: 'x', color: { a: '#111' } });
+  return compileSite(defineSite({ name, theme, pages: [page('p', node)] }));
+};
+
+test('inline: bundle carries a JSON-serializable inline marker (survives bundle.json round-trip)', () => {
+  const b = buildBundle('s', h('text', { size: 14 }, 'x'));
+  inlineLocal(b);
+  assert.equal(b.inline, true);
+  assert.equal(shouldWriteVariables(JSON.parse(JSON.stringify(b))), false);
+});
+
+test('deploy plan: variables write decision matrix (inline skips, watermark fallback kept)', () => {
+  const inlineThemed = buildThemed('s', h('text', { size: 14 }, 'x'));
+  inlineLocal(inlineThemed);
+  // populated data proves the FLAG, not empty variables.data, drives the skip
+  assert.ok(Object.keys(inlineThemed.variables.data).length > 0);
+  resetIds();
+  const themeless = buildBundle('s', h('text', { size: 14 }, 'x'));
+  // the PHP-warning regression envelope: theme-less fallback MUST still be written
+  assert.deepEqual(themeless.variables, { data: {}, watermark: 0, version: 1 });
+  resetIds();
+  const themed = buildThemed('s', h('text', { size: 14 }, 'x'));
+  const cases = [
+    ['inline themed bundle skips (flag wins over populated data)', inlineThemed, false],
+    ['non-inline theme-less writes the watermark fallback', themeless, true],
+    ['non-inline themed writes', themed, true],
+    ['pre-fix inline bundle.json (stats.inlined, no flag) skips', { stats: { inlined: 0 } }, false],
+    ['bare bundle writes (safe default)', {}, true],
+  ];
+  for (const [name, bundle, want] of cases) assert.equal(shouldWriteVariables(bundle), want, name);
+});
+
+test('deployBundle dry: inline bundle reports variablesSkipped=inline and never attempts the kit write', async () => {
+  const b = buildBundle('s', h('text', { size: 14 }, 'x'));
+  inlineLocal(b);
+  b.pages = [];                                  // fully offline — no fetch
+  // wpcli 'false' exits 1: IF the write path ran it would take the wp-cli-unavailable catch instead
+  const r = await deployBundle(b, { dry: true, wpcli: 'false' });
+  assert.equal(r.variables, 0);
+  assert.match(r.variablesSkipped, /inline/);
+  assert.doesNotMatch(r.variablesSkipped, /wp-cli unavailable/);
 });
