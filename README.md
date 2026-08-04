@@ -1,8 +1,34 @@
 # elementor-jsx
 
-React-level JSX → Elementor V4 compiler + one-shot deployer. **v1.0.0** — full
-Elementor catalog parity, certified on Elementor **4.1.4 / 4.2.0** by a 396-test
-suite that runs against a real WordPress stack.
+**Write small JSX components. Compile them to native Elementor pages. Deploy over REST.**
+
+React-level JSX → Elementor V4 compiler + one-shot deployer. Full Elementor catalog
+parity (atomic elements, theme parts, forms, loops, dynamic tags, interactions, SEO),
+certified on Elementor **4.1.4 → 4.2.1** (version adapters translate prop-format changes
+per version) by a **522-test** suite that runs against a real WordPress stack.
+
+MIT licensed. Not affiliated with or endorsed by Elementor Ltd — "Elementor" is their
+trademark; this is an independent compiler that targets their page format.
+
+## Quickstart
+
+Requirements: Node ≥ 18 · a WordPress site with **Elementor ≥ 4.1.4** (V4 atomic
+experiments on) and the **elementor-ultra companion plugin** (ships the deploy/validate
+REST endpoints — zip in the GitHub release) · an [application password](https://wordpress.org/documentation/article/application-passwords/).
+
+```sh
+npm i -D elementor-jsx
+npx exjsx init site            # scaffold theme.mjs + pages/home.page.jsx
+npx exjsx build site           # compile → site/site.bundle.json
+WP_URL=https://your-site.com WP_USER=admin WP_APP_PASSWORD=xxxx \
+npx exjsx deploy site/site.bundle.json
+```
+
+That's it — the page is live, native, and editable in the Elementor editor. Re-run
+deploy any time: it's idempotent, and drift hashes protect pages someone hand-edited
+in the editor (`--force` to overwrite deliberately).
+
+## Authoring
 
 ```jsx
 import { defineSite } from 'elementor-jsx';
@@ -36,12 +62,16 @@ export default defineSite({
 ```
 
 ```
-node src/cli.mjs build  site.jsx            # offline: JSX -> deployable bundle
-node src/cli.mjs deploy site.bundle.json    # 2 kit writes + N page upserts (idempotent)
-node src/cli.mjs watch  site.jsx --deploy   # rebuild+deploy on save
-node src/cli.mjs build  site.jsx --inline   # self-contained pages (multi-tenant kits)
-node src/cli.mjs decompile tree.json        # adopt an existing Elementor page into JSX
-node src/cli.mjs media  manifest.mjs        # hash-cached asset sideloading
+npx exjsx init  [dir]                # scaffold a minimal fs-project
+npx exjsx build site.jsx             # offline: JSX -> deployable bundle
+npx exjsx build mysite/                    # fs-project: pages/ + parts/ + theme.mjs discovered & wired
+npx exjsx deploy site.bundle.json    # 2 kit writes + N page upserts (idempotent)
+npx exjsx watch site.jsx --deploy   # rebuild+deploy on save
+npx exjsx build site.jsx --inline   # self-contained pages (multi-tenant kits)
+npx exjsx decompile tree.json        # adopt an existing Elementor page into JSX
+npx exjsx lint site.jsx --strict     # conventions check (CONVENTIONS.md) — CI gate
+npx exjsx inspect site.bundle.json   # readable bundle dump (custom_css decoded)
+npx exjsx media manifest.mjs        # hash-cached asset sideloading
 ```
 
 ## What's inside
@@ -49,6 +79,9 @@ node src/cli.mjs media  manifest.mjs        # hash-cached asset sideloading
 - `src/kit/` — **the canonical authoring kit** (typed envelopes, every atomic element,
   forms, tabs, video, dynamic tags, loops, interactions, `assertTree` shift-left gates).
   The elementor-ultra skill's old `lib/kit*.mjs` paths are re-export shims of these files.
+- `src/x.mjs` + `src/prelude.mjs` + `src/bundler.mjs` — the import system: `elementor-jsx` barrel
+  (every primitive, coverage-tested), auto-injected prelude (use `tabs`/`dyn`/`fontLoader`/`Page`…
+  with ZERO imports in built files), bare-specifier resolution without node_modules.
 - `src/runtime.mjs` — JSX render engine (theme context, intrinsics, kit-node mixing).
   Intrinsic tags: `box`/`div`/`row`/`col`/`section` (containers), `h1`–`h4`/`heading`,
   `text`/`p` (add `href` for a real anchor — there is no `<a>`/`<button>`), `img`, `html`.
@@ -60,14 +93,16 @@ node src/cli.mjs media  manifest.mjs        # hash-cached asset sideloading
 - `src/deploy.mjs` — one-shot deploy (variables + registry + pages + parts + SEO runtime),
   version-adaptive (4.1↔4.2), idempotent, registry-namespace-owning
 - `src/decompile.mjs` — any V4 tree → editable JSX (dynamic tags, interactions, full fidelity)
-- `types.d.ts` — the typed public API
+- `types.d.ts` — the typed public API (incl. global JSX namespace — editor autocomplete on intrinsics)
+- `CONVENTIONS.md` — the authoring doctrine; every rule cites the incident it prevents, and
+  `src/lint.mjs` (`exjsx lint`) enforces the mechanical subset
 
 ## Fresh dev environment (one command)
 
 ```
-git clone https://github.com/WPCursor/elementor-jsx && cd elementor-jsx && npm install
+git clone https://github.com/itshahmir/elementor-jsx && cd elementor-jsx && npm install
 EXJSX_ULTRA_ZIP=/path/to/elementor-ultra-mcp.zip sh dev/setup.sh
-npm test                     # 357 offline tests
+npm test                     # 522 offline tests
 EXJSX_IT=1 npm run test:it   # 39 live tests against the fresh stack
 ```
 
@@ -86,8 +121,13 @@ inside their snapshot window).
 
 ## Tests = the contract
 
-`npm test` (357 unit, offline) · `EXJSX_IT=1 npm run test:it` (39 live, needs the
+`npm test` (522 unit, offline) · `EXJSX_IT=1 npm run test:it` (live, needs the
 wpos stack). **`test/README.md` is the verified-facts catalog** — every rendering
 claim in this package is enforced there, incl. the 4.1↔4.2 span migration, XSS
 posture, and 13 field-found bugs. The coverage audit fails the suite if any export
 ships untested.
+
+## License
+
+[MIT](LICENSE) © 2026 [Algorismus](https://algorismus.io). Free forever — the compiler,
+CLI, kit and companion plugin are all open source.

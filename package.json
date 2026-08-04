@@ -1,8 +1,8 @@
 {
   "name": "elementor-jsx",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
-  "description": "React-level JSX -> Elementor V4 compiler + one-shot deployer. Full catalog parity (atomic elements, forms, theme parts, dynamic tags, loops, interactions, SEO), certified on Elementor 4.1.4/4.2.0 by a 396-test suite.",
+  "description": "JSX -> Elementor V4 compiler, deployer and CLI. Write small typed components, compile to native Elementor pages (atomic elements, theme parts, forms, loops, dynamic tags), deploy over REST with authoritative server-side validation, drift protection and version adapters. Certified on Elementor 4.1.4-4.2.1 by a 520-test suite.",
   "bin": {
     "exjsx": "./src/cli.mjs"
   },
@@ -12,17 +12,23 @@
     "deploy": "node src/cli.mjs deploy",
     "test": "node --test 'test/unit/*.test.mjs'",
     "test:it": "EXJSX_IT=1 node --test --test-concurrency=1 'test/integration/*.test.mjs'",
-    "test:all": "npm test && npm run test:it"
+    "test:all": "npm test && npm run test:it",
+    "prepublishOnly": "npm test"
   },
   "dependencies": {
     "esbuild": "^0.24.0"
   },
   "devDependencies": {
     "pixelmatch": "^7.2.0",
-    "pngjs": "^7.0.0"
+    "pngjs": "^7.0.0",
+    "typescript": "^5.9.0"
   },
   "exports": {
-    ".": "./src/site.mjs",
+    ".": "./src/x.mjs",
+    "./x": "./src/x.mjs",
+    "./prelude": "./src/prelude.mjs",
+    "./bundler": "./src/bundler.mjs",
+    "./site": "./src/site.mjs",
     "./kit": "./src/kit/kit.mjs",
     "./components": "./src/kit/kit-components.mjs",
     "./jsx-components": "./src/components/index.jsx",
@@ -33,11 +39,41 @@
     "./deploy": "./src/deploy.mjs",
     "./decompile": "./src/decompile.mjs",
     "./media": "./src/media.mjs",
-    "./inline": "./src/inline.mjs"
+    "./inline": "./src/inline.mjs",
+    "./inspect": "./src/inspect.mjs",
+    "./lint": "./src/lint.mjs",
+    "./project": "./src/project.mjs"
   },
   "files": [
     "src/",
     "types.d.ts",
-    "README.md"
-  ]
+    "README.md",
+    "CONVENTIONS.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "elementor",
+    "wordpress",
+    "jsx",
+    "compiler",
+    "site-builder",
+    "mcp",
+    "ai-agents",
+    "page-builder",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/itshahmir/elementor-jsx.git"
+  },
+  "bugs": {
+    "url": "https://github.com/itshahmir/elementor-jsx/issues"
+  },
+  "homepage": "https://github.com/itshahmir/elementor-jsx#readme",
+  "author": "Algorismus <shahmir@algorismus.io> (https://algorismus.io)"
 }
