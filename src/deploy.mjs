@@ -113,12 +113,24 @@ export async function deployBundle(bundle, cfg = {}) {
   const report = { variables: 0, classes: 0, pages: [] };
   if (plan.warnings.length) report.warnings = plan.warnings;
 
-  // 0) version-adaptive span form (wp-cli; REST-only targets keep the authored form)
+  // 0) version-adaptive prop forms (font-family, spans, border-radius-v2). Detect the target's
+  // Elementor version via wp-cli when available, else over REST from the companion plugin's
+  // capabilities endpoint — so no-Docker / REST-only targets (WordPress Playground, remote hosts)
+  // still adapt to 4.2+ instead of shipping the 4.1 forms that 422 there.
+  let ver = '';
   try {
-    const ver = sh(wpcli[0], [...wpcli.slice(1), 'plugin', 'get', 'elementor', '--field=version']).trim();
+    ver = sh(wpcli[0], [...wpcli.slice(1), 'plugin', 'get', 'elementor', '--field=version']).trim();
+  } catch { /* no wp-cli — fall back to REST below */ }
+  if (!ver && wpUrl) {
+    try {
+      const r = await fetch(`${wpUrl}/wp-json/elementor-ultra/v1/site/capabilities`, { headers: { Authorization: auth } });
+      if (r.ok) { const j = await r.json(); ver = (j?.data ?? j)?.elementor_version || ''; }
+    } catch { /* leave spans as authored if the version can't be determined */ }
+  }
+  if (ver) {
     report.elementorVersion = ver;
     report.spanForm = adaptSpansForVersion(bundle, ver);
-  } catch { /* no wp-cli — leave spans as authored */ }
+  }
 
   // 1) ONE-SHOT kit write: all variables in a single update_post_meta (no per-token round-trips).
   // Requires wp-cli (EXJSX_WPCLI). GRACEFUL: if wp-cli isn't available (e.g. a REST-only tester setup),

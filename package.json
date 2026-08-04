@@ -1,6 +1,6 @@
 {
   "name": "@algorismus/elementor-jsx",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "type": "module",
   "description": "The build layer that lets AI agents ship Elementor sites like software. Agents write small typed JSX components instead of 4,000-line _elementor_data blobs; the compiler emits native Elementor V4 JSON and deploys it over REST with authoritative server-side validation, drift protection and version adapters. Every run is a git diff you review, not JSON you audit. Certified on Elementor 4.1.4-4.2.1 by a 522-test suite.",
   "bin": {

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.2 — 2026-08-05
+
+- **Deploy adapts to Elementor 4.2+ without wp-cli.** Version detection now falls back to the
+  companion plugin's REST capabilities endpoint when wp-cli is absent — so no-Docker / REST-only
+  targets (WordPress Playground, remote hosts) get the 4.2 font-family / span / border-radius
+  adapters instead of shipping 4.1 forms that 422 there. (Found via a field run on WordPress
+  Playground where the class-registry write failed on `font-family: invalid_value`.)
+
 ## 1.1.1 — 2026-08-04
 
 Field-report fixes (a fresh agent building on Windows against Elementor 4.1.5):
