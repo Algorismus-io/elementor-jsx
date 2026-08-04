@@ -17,7 +17,7 @@ for (const _d of [process.cwd(), new URL('../', import.meta.url).pathname]) {
 import esbuild from 'esbuild';
 import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compileSite } from './compile.mjs';
 import { deployBundle, shouldWriteVariables } from './deploy.mjs';
@@ -142,7 +142,7 @@ async function build(entry) {
     // exjsx decompile <tree.json> [out.jsx] — invert any Elementor V4 _elementor_data → editable JSX
     const { decompile } = await import('./decompile.mjs');
     const tree = JSON.parse(readFileSync(resolve(arg), 'utf8'));
-    const base = (arg.split('/').pop() || 'page').replace(/\.json$/, '');
+    const base = basename(arg).replace(/\.json$/, '') || 'page';
     const name = base.replace(/[^a-z0-9]+/gi, ' ').replace(/(^|\s)\w/g, (m) => m.trim().toUpperCase()).replace(/\s/g, '') || 'Page';
     const src = decompile(Array.isArray(tree) ? tree : (tree.content || tree.elements || []), { name, slug: base });
     const out = (arg2 && !arg2.startsWith('--')) ? arg2 : resolve(dirname(resolve(arg)), `${base}.jsx`);
@@ -183,7 +183,10 @@ async function build(entry) {
     if (existsSync(join(dir, 'theme.mjs'))) { console.error(`exjsx init: ${dir}/theme.mjs already exists — refusing to overwrite`); process.exit(2); }
     mkdirSync(join(dir, 'pages'), { recursive: true });
     mkdirSync(join(dir, 'parts'), { recursive: true });
-    const name = dir.split('/').filter(Boolean).pop() || 'my-site';
+    // basename is cross-platform (handles \\ on Windows); sanitize so the value is safe to embed
+    // in the generated theme/config string literals (a raw Windows path like D:\\new project would
+    // otherwise inject \\n/\\t escapes).
+    const name = (basename(dir) || 'my-site').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'my-site';
     writeFileSync(join(dir, 'site.config.mjs'), `export default { name: '${name}' };\n`);
     writeFileSync(join(dir, 'theme.mjs'), `/** Design tokens — every page receives these as \`theme\`. */
 export default defineTheme({
@@ -197,6 +200,12 @@ export default defineTheme({
     white: '#FFFFFF',
   },
   font: { head: 'Fraunces', body: 'Inter' },
+
+  // 'literal' emits colors/fonts as hex/name directly — renders on every Elementor version.
+  // Switch to 'var' for LIVE binding (edits in Elementor's Class Manager propagate), but note
+  // var-mode text needs Elementor to resolve the variables — on 4.1.x that path can silently
+  // drop text color/font, leaving pages unstyled. Start literal; opt into var when you need it.
+  mode: 'literal',
 });
 `);
     writeFileSync(join(dir, 'pages', 'home.page.jsx'), `/** Homepage — slug comes from the filename. */
