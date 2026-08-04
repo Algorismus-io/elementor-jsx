@@ -17,7 +17,7 @@ experiments on) and the **[elementor-ultra companion plugin](https://github.com/
 REST endpoints — zip in the GitHub release, source in that repo) · an [application password](https://wordpress.org/documentation/article/application-passwords/).
 
 ```sh
-npm i -D elementor-jsx
+npm i -D @algorismus/elementor-jsx
 npx exjsx init site            # scaffold theme.mjs + pages/home.page.jsx
 npx exjsx build site           # compile → site/site.bundle.json
 WP_URL=https://your-site.com WP_USER=admin WP_APP_PASSWORD=xxxx \

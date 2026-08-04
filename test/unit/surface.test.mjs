@@ -63,6 +63,9 @@ test('surface: bare specifiers resolve via package.json exports; unknown subpath
   assert.ok(resolveSpecifier('elementor-jsx').endsWith('src/x.mjs'), 'root → barrel');
   assert.ok(resolveSpecifier('elementor-jsx/kit').endsWith('kit/kit.mjs'));
   assert.ok(resolveSpecifier('elementor-jsx/theme').endsWith('theme.mjs'));
+  // the scoped published name resolves identically (import by convention or by package name)
+  assert.ok(resolveSpecifier('@algorismus/elementor-jsx').endsWith('src/x.mjs'), 'scoped root → barrel');
+  assert.ok(resolveSpecifier('@algorismus/elementor-jsx/kit').endsWith('kit/kit.mjs'), 'scoped subpath');
   assert.equal(resolveSpecifier('some-other-pkg'), null, 'non-exjsx specifiers pass through');
   assert.throws(() => resolveSpecifier('elementor-jsx/nope'), /unknown subpath.*valid:.*elementor-jsx\/kit/);
 });

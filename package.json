@@ -1,5 +1,5 @@
 {
-  "name": "elementor-jsx",
+  "name": "@algorismus/elementor-jsx",
   "version": "1.1.0",
   "type": "module",
   "description": "JSX -> Elementor V4 compiler, deployer and CLI. Write small typed components, compile to native Elementor pages (atomic elements, theme parts, forms, loops, dynamic tags), deploy over REST with authoritative server-side validation, drift protection and version adapters. Certified on Elementor 4.1.4-4.2.1 by a 520-test suite.",
@@ -75,5 +75,8 @@
     "url": "https://github.com/Algorismus-io/elementor-jsx/issues"
   },
   "homepage": "https://github.com/Algorismus-io/elementor-jsx#readme",
-  "author": "Algorismus <shahmir@algorismus.io> (https://algorismus.io)"
+  "author": "Algorismus <shahmir@algorismus.io> (https://algorismus.io)",
+  "publishConfig": {
+    "access": "public"
+  }
 }

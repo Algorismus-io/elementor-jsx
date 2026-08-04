@@ -16,9 +16,11 @@ import { fileURLToPath } from 'node:url';
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const EXPORTS = JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf8')).exports;
 
-/** Resolve 'elementor-jsx[/<sub>]' via the package.json exports map. Throws naming valid subpaths. */
+/** Resolve 'elementor-jsx[/<sub>]' (or the scoped '@algorismus/elementor-jsx[/<sub>]') via the
+ * package.json exports map. Both specifiers work so a project can import by the bare convention
+ * or by the published package name. Throws naming valid subpaths. */
 export function resolveSpecifier(spec) {
-  const m = spec.match(/^elementor-jsx(\/.*)?$/);
+  const m = spec.match(/^(?:@algorismus\/)?elementor-jsx(\/.*)?$/);
   if (!m) return null;
   const key = '.' + (m[1] ?? '');
   const target = EXPORTS[key];
