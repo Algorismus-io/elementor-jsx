@@ -10,7 +10,7 @@
   "scripts": {
     "build": "node src/cli.mjs build",
     "deploy": "node src/cli.mjs deploy",
-    "test": "node --test 'test/unit/*.test.mjs'",
+    "test": "node --test test/unit/",
     "test:it": "EXJSX_IT=1 node --test --test-concurrency=1 'test/integration/*.test.mjs'",
     "test:all": "npm test && npm run test:it",
     "prepublishOnly": "npm test"
