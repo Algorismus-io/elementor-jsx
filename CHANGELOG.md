@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.3 — 2026-08-05
+
+- **`border={number}` is a width, not a color.** A bare number used to be read as the border color,
+  emitting `border-color:{value:1}` which 422s the deploy (`border-color: invalid_value`). Now
+  `border={1}` is `border-width:1px` (color from `borderColor` or currentColor), `border="#ccc"` is
+  a color, `border={[w,c]}` is both, and a new `borderColor` prop works standalone. (Found via a
+  field run.)
+
 ## 1.1.2 — 2026-08-05
 
 - **Deploy adapts to Elementor 4.2+ without wp-cli.** Version detection now falls back to the

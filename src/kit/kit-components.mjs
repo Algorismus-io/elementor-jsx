@@ -111,7 +111,20 @@ export function sx(o = {}) {
   if (o.pos) p.position = S(o.pos);
   if (o.shadow) p['box-shadow'] = Array.isArray(o.shadow) ? SHADOW(...o.shadow) : o.shadow;
   if (o.fit) p['object-fit'] = S(o.fit);
-  if (o.border) { const [w, c] = Array.isArray(o.border) ? o.border : [1, o.border]; p['border-width'] = SZ(w); p['border-color'] = C(c); p['border-style'] = S('solid'); }
+  // border: [w, c] (both) · string (color, width 1) · number (width, color from borderColor or
+  // currentColor). A bare number is a WIDTH like CSS `border:1px` — never a color; treating it as a
+  // color used to emit border-color:{value:1}, which 422s the deploy with border-color: invalid_value.
+  if (o.border != null) {
+    let w, c;
+    if (Array.isArray(o.border)) [w, c] = o.border;
+    else if (typeof o.border === 'number') { w = o.border; c = o.borderColor; }
+    else { w = 1; c = o.border; }
+    p['border-width'] = SZ(w);
+    if (c != null) p['border-color'] = C(c);
+    p['border-style'] = S('solid');
+  } else if (o.borderColor != null) {
+    p['border-color'] = C(o.borderColor); p['border-width'] = SZ(1); p['border-style'] = S('solid');
+  }
   if (o.tablet) p._t = sx(o.tablet);
   if (o.mobile) p._m = sx(o.mobile);
   return { ...p, ...(o.props || {}) };

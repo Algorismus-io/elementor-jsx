@@ -85,6 +85,14 @@ const CASES = [
     { 'border-width': SZ(2), 'border-color': C('#E4E9DC'), 'border-style': S('solid') }],
   ['border color-only → 1px', { border: '#E4E9DC' },
     { 'border-width': SZ(1), 'border-color': C('#E4E9DC'), 'border-style': S('solid') }],
+  // a bare NUMBER is a width like CSS `border:1px` — must NOT become border-color:{value:1}
+  // (which 422s the deploy). Regression from a field run.
+  ['border number → width only, no poisoned color', { border: 1 },
+    { 'border-width': SZ(1), 'border-style': S('solid') }],
+  ['border number + borderColor → both', { border: 2, borderColor: '#ccc' },
+    { 'border-width': SZ(2), 'border-color': C('#ccc'), 'border-style': S('solid') }],
+  ['borderColor alone → color + 1px solid', { borderColor: '#E4E9DC' },
+    { 'border-color': C('#E4E9DC'), 'border-width': SZ(1), 'border-style': S('solid') }],
 ];
 
 for (const [name, input, expected] of CASES) {
