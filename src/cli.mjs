@@ -129,8 +129,15 @@ async function build(entry) {
     });
     await new Promise(() => {});                       // stay alive
   } else if (cmd === 'media') {
+    // exjsx media <manifest.mjs> [map.json] — hash-cached asset sideloading. Fail with usage,
+    // not a raw ERR_MODULE_NOT_FOUND, when the manifest is missing.
+    const manifest = arg || 'data/images.manifest.mjs';
+    if (!_ex(resolve(manifest))) {
+      console.error(`usage: exjsx media <manifest.mjs> [map.json]\n  manifest not found: ${resolve(manifest)}`);
+      process.exit(2);
+    }
     const { sideloadManifest } = await import('./media.mjs');
-    await sideloadManifest(arg || 'data/images.manifest.mjs', (arg2 && !arg2.startsWith('--')) ? arg2 : 'data/media-map.json');
+    await sideloadManifest(manifest, (arg2 && !arg2.startsWith('--')) ? arg2 : 'data/media-map.json');
   } else if (cmd === 'decompile') {
     // exjsx decompile <tree.json> [out.jsx] — invert any Elementor V4 _elementor_data → editable JSX
     const { decompile } = await import('./decompile.mjs');
