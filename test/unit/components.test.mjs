@@ -209,3 +209,11 @@ test('component library kitchen-sink compiles + dedups through compileSite', () 
     .filter((v, i, a) => a.indexOf(v) !== i);
   assert.ok(cardRefs.length > 0, 'at least one class is shared between structurally-equal nodes');
 });
+
+test('sx loud vocabulary: w fit-content and dir col throw with the right token', async () => {
+  const { box } = await import('../../src/kit/kit-components.mjs');
+  assert.throws(() => box({ w: 'fit-content' }), /use 'hug'/);
+  assert.throws(() => box({ dir: 'col' }), /use 'column'/);
+  assert.throws(() => box({ dir: 'diagonal' }), /'row' \| 'column'/);
+  assert.doesNotThrow(() => box({ w: 'hug', dir: 'column' }));
+});

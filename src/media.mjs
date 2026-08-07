@@ -44,11 +44,18 @@ export async function sideloadManifest(manifestPath, mapPath = 'data/media-map.j
         continue;
       }
     }
-    // idempotency: an attachment slugged exjsx-<slot> already in the library wins
+    // idempotency: an attachment slugged exjsx-<slot> already in the library wins — but only for
+    // src-entries (no local bytes to compare). A local FILE that got past the hash-cache above has
+    // new/unknown bytes: keeping the slug hit would silently serve stale content (real incident:
+    // recolored logos never reached the site). Replace the stale attachment and fall through to upload.
     const slug = `exjsx-${e.slot}`;
     const found = await (await fetch(`${wpUrl}/wp-json/wp/v2/media?search=${slug}&per_page=10`, { headers: { Authorization: auth } })).json();
     const hit = Array.isArray(found) && found.find((m) => (m.slug || '').startsWith(slug));
-    if (hit) { map[e.slot] = { type: 'image', id: hit.id, url: hit.source_url, alt: e.alt || '' }; console.log(`  KEEP  ${e.slot} → id ${hit.id}`); continue; }
+    if (hit && !e.file) { map[e.slot] = { type: 'image', id: hit.id, url: hit.source_url, alt: e.alt || '' }; console.log(`  KEEP  ${e.slot} → id ${hit.id}`); continue; }
+    if (hit && e.file) {
+      const del = await fetch(`${wpUrl}/wp-json/wp/v2/media/${hit.id}?force=true`, { method: 'DELETE', headers: { Authorization: auth } });
+      console.log(`  REUP  ${e.slot} — bytes changed; replacing stale id ${hit.id}${del.ok ? '' : ` (delete HTTP ${del.status} — uploading anyway)`}`);
+    }
 
     let bytes, ext;
     if (e.file) { const p = resolve(e.file); bytes = readFileSync(p); ext = extname(p) || '.jpg'; }

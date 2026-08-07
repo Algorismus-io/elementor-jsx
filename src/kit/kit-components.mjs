@@ -45,10 +45,20 @@ import { mergeTw } from '../tw.mjs';
  * A compact style object maps to the verbose atomic prop envelopes. Numbers are px unless the
  * value says otherwise ('50%' → percent width). Recurses into `mobile`/`tablet`. Anything the
  * map doesn't cover goes through `raw` (a CSS string) via `box`/`styled`. */
-const width = (v) =>
-  v === 'hug' ? HUG : v === 'auto' ? AUTO
-    : typeof v === 'string' ? SZ(parseFloat(v), v.trim().endsWith('%') ? '%' : 'px')
-    : SZ(v);
+const width = (v) => {
+  if (v === 'hug') return HUG;
+  if (v === 'auto') return AUTO;
+  if (typeof v === 'string') {
+    const n = parseFloat(v);
+    if (Number.isNaN(n)) {
+      // 'fit-content'/'max-content'/etc. would silently compile to a NaN envelope (field report:
+      // agents reach for CSS keywords here) — name the right token instead.
+      throw new Error(`sx width/height: unknown value '${v}' — use 'hug' (= fit-content), 'auto', a number (px), or 'N%'`);
+    }
+    return SZ(n, v.trim().endsWith('%') ? '%' : 'px');
+  }
+  return SZ(v);
+};
 /** flex composite (Elementor Flex_Prop_Type: flexGrow/flexShrink/flexBasis). FLEX(1) → `flex:1 1 0`. */
 export const FLEX = (grow = 1, shrink = 1, basis = 0) => ({
   $$type: 'flex',
@@ -125,7 +135,12 @@ export function sx(o = {}) {
   if (o.h != null) p.height = width(o.h);
   if (o.align) p['align-items'] = S(o.align);
   if (o.justify) p['justify-content'] = S(o.justify);
-  if (o.dir) p['flex-direction'] = S(o.dir);
+  if (o.dir) {
+    const DIRS = { row: 'row', column: 'column', 'row-reverse': 'row-reverse', 'column-reverse': 'column-reverse', col: null, vertical: null, horizontal: null };
+    if (!(o.dir in DIRS)) throw new Error(`sx dir: unknown value '${o.dir}' — use 'row' | 'column' | 'row-reverse' | 'column-reverse'`);
+    if (DIRS[o.dir] === null) throw new Error(`sx dir: '${o.dir}' is not a flex-direction — use '${o.dir === 'col' || o.dir === 'vertical' ? 'column' : 'row'}'`);
+    p['flex-direction'] = S(DIRS[o.dir]);
+  }
   if (o.wrap) p['flex-wrap'] = S(o.wrap === true ? 'wrap' : o.wrap);
   if (o.color) p.color = colorVal(o.color);
   if (o.size != null) p['font-size'] = SZ(num(o.size));

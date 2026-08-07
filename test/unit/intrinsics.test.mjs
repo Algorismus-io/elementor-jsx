@@ -271,3 +271,10 @@ test('list rendering: array.map children flatten into siblings', () => {
   assert.equal(n.elements.length, 3);
   assert.equal(textOf(n.elements[2]), 'c');
 });
+
+test('id prop → settings._cssid on containers, headings, text and img', async () => {
+  assert.equal(render(h('box', { id: 'signup' })).settings._cssid.value, 'signup');
+  assert.equal(render(h('h2', { id: 'features' }, 'X')).settings._cssid.value, 'features');
+  assert.equal(render(h('text', { id: 'note' }, 'X')).settings._cssid.value, 'note');
+  assert.equal(render(h('img', { id: 'shot', src: 'https://x.co/a.png' })).settings._cssid.value, 'shot');
+});

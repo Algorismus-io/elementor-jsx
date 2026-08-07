@@ -222,3 +222,13 @@ test('fontLoader: preconnect + css2 link, weights sorted, spaces encoded', () =>
   assert.match(f.settings.html, /family=Sora\+Display:wght@400;700&display=swap/);
   assert.match(f.settings.html, /preconnect.*fonts\.gstatic\.com/);
 });
+
+test('css(): chunk without trailing semicolon gets one (last-declaration-drop guard)', () => {
+  const n = sect('section', {}, []);
+  css(n, 'position:relative;overflow:hidden;background:#000');
+  assert.match(customCssOf(n), /background:#000;$/, 'terminator appended');
+  css(n, '& em { color: red; }');
+  assert.match(customCssOf(n), /\}$/, 'brace-terminated chunk left alone');
+  css(n, 'color:blue');
+  assert.match(customCssOf(n), /color:blue;$/, 'merged chunk also terminated');
+});

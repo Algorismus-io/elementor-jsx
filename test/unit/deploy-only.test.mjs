@@ -101,3 +101,20 @@ test('cli deploy --dry --only lists exactly the named page and reports kit skip'
   assert.match(out, /alpha/);
   assert.doesNotMatch(out, /beta/);
 });
+
+test('email action adapts email→emails (4.2+) and back (4.1), to becomes string-array', async () => {
+  const { adaptSpansForVersion } = await import('../../src/deploy.mjs');
+  const S = (v) => ({ $$type: 'string', value: v });
+  const mk = () => ({ name: 'b', classes: { items: {} }, pages: [{ title: 'p', elements: [{ id: 'f1', elType: 'e-form',
+    settings: { email: { $$type: 'email', value: { to: S('a@b.co'), message: S('[all-fields]') } } }, styles: {}, elements: [] }] }] });
+  const b42 = mk();
+  adaptSpansForVersion(b42, '4.2.1');
+  const e42 = b42.pages[0].elements[0].settings.email;
+  assert.equal(e42.$$type, 'emails');
+  assert.equal(e42.value.to.$$type, 'string-array');
+  assert.equal(e42.value.to.value[0].value, 'a@b.co');
+  adaptSpansForVersion(b42, '4.1.4'); // and back
+  const e41 = b42.pages[0].elements[0].settings.email;
+  assert.equal(e41.$$type, 'email');
+  assert.equal(e41.value.to.value, 'a@b.co');
+});

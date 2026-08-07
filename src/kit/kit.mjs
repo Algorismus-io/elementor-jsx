@@ -219,6 +219,12 @@ export function node(elType, opts = {}, _positionalChildren) {
  * (the AF1 inverse trap; the object shape fatals Pro sitewide there).
  */
 export function css(n, decls, { breakpoint = 'desktop' } = {}) {
+  // Terminate the chunk: the renderer joins chunks/lines with \n, so a final declaration missing
+  // its ';' silently dies in the browser's CSS parser (real incident: a raw ending in `top:598px`
+  // dropped top/overflow/background across a whole hero). `}`-terminated chunks (nested rules,
+  // @media blocks) need no ';'.
+  decls = String(decls).trimEnd();
+  if (decls && !decls.endsWith(';') && !decls.endsWith('}')) decls += ';';
   let sid = Object.keys(n.styles ?? {})[0];
   if (!sid) {
     sid = `e-${n.id}-s`;

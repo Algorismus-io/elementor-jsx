@@ -26,7 +26,7 @@ const verAtLeast = (version, [a, b, c]) => {
   return x !== a ? x > a : y !== b ? y > b : z >= c;
 };
 
-function adaptSpansForVersion(bundle, version) {
+export function adaptSpansForVersion(bundle, version) {
   const major = parseFloat(version) || 0;
   const radiusV2 = verAtLeast(version, [4, 2, 1]);
   const toTarget = (v) => {
@@ -54,8 +54,27 @@ function adaptSpansForVersion(bundle, version) {
     if (props?.['font-family']) props['font-family'] = fontToTarget(props['font-family']);
     if (props?.['border-radius']) props['border-radius'] = radiusToTarget(props['border-radius']);
   };
+  // 4.2.x Pro-form email action: $$type 'email' → 'emails', and `to` becomes a string-array of
+  // string envelopes (live-probed on 4.2.1 + Pro 4.1.0: 'email'/plain-string 422s invalid_value;
+  // found by a field agent). Adapt both directions on the ELEMENT SETTINGS (not styles).
+  const S = (v) => ({ $$type: 'string', value: v });
+  const emailToTarget = (v) => {
+    if (!v || (v.$$type !== 'email' && v.$$type !== 'emails')) return v;
+    if (major >= 4.2 && v.$$type === 'email') {
+      const to = v.value?.to;
+      const toArr = to?.$$type === 'string' ? { $$type: 'string-array', value: [to] } : to;
+      return { ...v, $$type: 'emails', value: { ...v.value, ...(toArr ? { to: toArr } : {}) } };
+    }
+    if (major < 4.2 && v.$$type === 'emails') {
+      const to = v.value?.to;
+      const toStr = to?.$$type === 'string-array' ? (to.value?.[0]?.$$type === 'string' ? to.value[0] : S(to.value?.[0])) : to;
+      return { ...v, $$type: 'email', value: { ...v.value, ...(toStr ? { to: toStr } : {}) } };
+    }
+    return v;
+  };
+  const walkSettings = (settings) => { if (settings?.email) settings.email = emailToTarget(settings.email); };
   const walkStyles = (styles) => { for (const st of Object.values(styles || {})) for (const va of st.variants || []) walkProps(va.props); };
-  const walkEls = (ns) => { for (const n of ns || []) { walkStyles(n.styles); walkEls(n.elements); } };
+  const walkEls = (ns) => { for (const n of ns || []) { walkSettings(n.settings); walkStyles(n.styles); walkEls(n.elements); } };
   for (const item of Object.values(bundle.classes?.items || {})) for (const va of item.variants || []) walkProps(va.props);
   for (const p of bundle.pages || []) walkEls(p.elements);
   for (const p of bundle.parts || []) walkEls(p.elements);
@@ -138,11 +157,18 @@ export async function deployBundle(bundle, cfg = {}) {
   // Inline bundles skip this entirely (zero kit writes) — see shouldWriteVariables above.
   // --only skips ALL kit writes (variables + classes + parts); pages still deploy below. An inline
   // bundle under --only legitimately reports BOTH kitSkipped and variablesSkipped — additive, not
-  // suppressed. (Note: plain --dry still runs this step — pre-existing, --dry --only does not.)
+  // suppressed. --dry skips all kit writes too and reports variablesDry/classesDry instead.
   if (plan.skipKit) {
     report.kitSkipped = '--only: kit writes skipped (variables + classes + parts untouched)';
   }
-  if (!plan.skipKit && shouldWriteVariables(bundle)) {
+  if (cfg.dry && !plan.skipKit) {
+    // --dry is a READ-ONLY pre-check across the board: page saves are dry-run'd below, and the kit
+    // must be untouched too (this step used to write variables + rewrite the whole class registry
+    // with orphan deletion on a "dry" run — a state-mutating preflight).
+    if (shouldWriteVariables(bundle)) report.variablesDry = `would write ${Object.keys(bundle.variables?.data || {}).length} variable(s)`;
+    if (bundle.classes?.order?.length) report.classesDry = `would PUT ${bundle.classes.order.length} class(es) + orphan cleanup`;
+  }
+  if (!cfg.dry && !plan.skipKit && shouldWriteVariables(bundle)) {
     const b64 = Buffer.from(JSON.stringify(bundle.variables)).toString('base64');
     const php = `$k=\\Elementor\\Plugin::$instance->kits_manager->get_active_id(); update_post_meta($k,'_elementor_global_variables', wp_slash(base64_decode('${b64}'))); echo 'vars='.count(json_decode(base64_decode('${b64}'),true)['data']);`;
     try {
@@ -159,7 +185,7 @@ export async function deployBundle(bundle, cfg = {}) {
 
   // 1b) ONE-SHOT class registry write: the WHOLE {items, order} in a single canonical PUT (the endpoint
   // the Class Manager uses — it writes the meta + CPT posts internally). Before pages so class CSS primes.
-  if (!plan.skipKit && bundle.classes?.order?.length && wpUrl) {
+  if (!cfg.dry && !plan.skipKit && bundle.classes?.order?.length && wpUrl) {
     // Own the namespace: delete classes currently in the kit that this build doesn't declare (orphan
     // cleanup). Single-site-per-kit assumption — for a shared kit, scope by a class-name prefix instead.
     let deleted = [];
@@ -296,7 +322,22 @@ add_action( 'wp_head', function () {
     // existing one, in a single call. No optimistic-concurrency dance needed for a deploy.
     const rt = await fetch(eu(`/documents/${id}/save`), { method: 'POST', headers: jhead, body: JSON.stringify({ elements: p.elements }) });
     if (!rt.ok) { report.pages.push({ title: p.title, id, slug, action: `ERR save ${rt.status}: ${(await rt.text()).slice(0, 100)}` }); continue; }
-    await fetch(eu(`/documents/${id}/prime-css`), { method: 'POST', headers: jhead, body: '{}' }).catch(() => {});
+    // SELF-PRIMING with retry: on PHP-WASM the first prime after a save races the CSS flush and
+    // 500s CSS_PRIME_FAILED (retryable) — a settle + retry converts nearly all of those into
+    // successes. Field agents were healing this by hand after every deploy; now the deploy owns it.
+    let primed = false;
+    for (let attempt = 0; attempt < 3 && !primed; attempt++) {
+      if (attempt) {
+        // a real frontend render writes the global-<id> stylesheets that the programmatic dispatch
+        // can miss (observed mode: page enqueues them, generator believes them valid, files absent —
+        // only a page visit regenerates them). Visit, settle, retry.
+        await fetch(`${wpUrl}/?page_id=${id}`, { signal: AbortSignal.timeout(20000) }).catch(() => {});
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+      const pr = await fetch(eu(`/documents/${id}/prime-css`), { method: 'POST', headers: jhead, body: '{}' }).catch(() => null);
+      primed = !!pr?.ok;
+    }
+    if (!primed) report.cssPrimeWarnings = [...(report.cssPrimeWarnings || []), `page ${id}: prime-css failed after 3 attempts — run \`eu-studio doctor --page ${id}\` or visit the page`];
     // ensure canvas template + stable slug via WP REST.
     try { await fetch(`${wpUrl}/wp-json/wp/v2/pages/${id}`, { method: 'POST', headers: jhead, body: JSON.stringify({ slug, template: p.template === 'elementor_canvas' ? 'elementor_canvas' : undefined }) }); } catch {}
     // per-page SEO meta (mu-plugin renders it; wp-cli write — REST has no arbitrary-meta route)

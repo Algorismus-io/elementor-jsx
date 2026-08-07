@@ -110,12 +110,14 @@ function intrinsic(type, props, children) {
     case 'h1': case 'h2': case 'h3': case 'h4': case 'heading': {
       // dyn={dyn.postTitle()} binds the content to a dynamic tag (children ignored)
       const hn = heading(type === 'heading' ? tag || 'h2' : type, dynTag ?? textOf(children), sx(style));
+      if (id) hn.settings._cssid = { $$type: 'string', value: id };
       if (href) hn.settings.link = LINK(href);
       if (raw) styled(hn, { raw });              // raw CSS applies to text nodes too (uppercase, nowrap, accent spans…)
       return withFx(addGcls(markCls(hn, cls), gcls));
     }
     case 'text': case 'p': {
       const pn = para(dynTag ?? textOf(children), sx(style));
+      if (id) pn.settings._cssid = { $$type: 'string', value: id };
       if (href) pn.settings.link = LINK(href);   // atomic paragraph renders a real anchor
       if (raw) styled(pn, { raw });
       return withFx(addGcls(markCls(pn, cls), gcls));
@@ -130,6 +132,7 @@ function intrinsic(type, props, children) {
         throw new Error('exjsx: <img src={id} alt="…"> — Elementor takes alt for attachment images from the attachment\'s alt_text (set `alt:` in the media manifest), or pass a URL src to use inline alt');
       }
       const im = typeof props.src === 'string' ? imageUrl(props.src, alt || '', sx(style)) : image(props.src, sx(style));
+      if (id) im.settings._cssid = { $$type: 'string', value: id };
       if (raw) styled(im, { raw });
       return withFx(addGcls(markCls(im, cls), gcls));
     }
