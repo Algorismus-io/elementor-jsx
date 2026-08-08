@@ -125,12 +125,27 @@ export function planOnly(bundle, only) {
 export async function deployBundle(bundle, cfg = {}) {
   // --only validation FIRST — an unknown slug must throw before any wp-cli call or fetch
   const plan = planOnly(bundle, cfg.only);
-  const wpcli = (cfg.wpcli || process.env.EXJSX_WPCLI || 'wp').split(' ');
+  let wpcli = (cfg.wpcli || process.env.EXJSX_WPCLI || 'wp').split(' ');
   const cli = cfg.cli || process.env.EXJSX_CLI;
   const wpUrl = cfg.wpUrl || process.env.WP_URL;
   const auth = 'Basic ' + Buffer.from(`${process.env.WP_USER}:${process.env.WP_APP_PASSWORD}`).toString('base64');
   const report = { variables: 0, classes: 0, pages: [] };
   if (plan.warnings.length) report.warnings = plan.warnings;
+
+  // wp-cli TARGET GUARD: a stray EXJSX_WPCLI (a repo .env pointing at some other stack's docker cli)
+  // must never speak for THIS deploy's target — it answers with the WRONG site's Elementor version
+  // (skewing the 4.1/4.2 envelope adapters into guaranteed 422s) and would write kit meta into the
+  // wrong site. Trust wp-cli only when its siteurl matches WP_URL (host:port; localhost ≡ 127.0.0.1).
+  if (wpUrl) {
+    try {
+      const cliSite = sh(wpcli[0], [...wpcli.slice(1), 'option', 'get', 'siteurl']).trim();
+      const norm = (u) => { try { const p = new URL(u); return `${p.hostname.replace(/^localhost$/, '127.0.0.1')}:${p.port || (p.protocol === 'https:' ? 443 : 80)}`; } catch { return u; } };
+      if (norm(cliSite) !== norm(wpUrl)) {
+        report.wpcliSkipped = `EXJSX_WPCLI targets ${cliSite} but WP_URL is ${wpUrl} — wp-cli ignored for this deploy (REST-only)`;
+        wpcli = ['__exjsx-wpcli-disabled__']; // every sh() call lands in its existing graceful catch
+      }
+    } catch { /* wp-cli absent/unreachable — existing per-call catches handle it */ }
+  }
 
   // 0) version-adaptive prop forms (font-family, spans, border-radius-v2). Detect the target's
   // Elementor version via wp-cli when available, else over REST from the companion plugin's
