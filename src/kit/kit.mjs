@@ -252,6 +252,36 @@ export function css(n, decls, { breakpoint = 'desktop' } = {}) {
  * same shape as the converter's font-carry widget) emitting preconnect + css2 stylesheet links.
  * Place it FIRST in the tree. For NON-catalog faces use `cli.mjs font-install` (S4) instead.
  */
+/**
+ * Visible success state for the Pro atomic form — the runner itself renders NO feedback on submit
+ * (field reality: every build with a form hand-wrote this fetch/XHR hook, ~2 min each). Drop ONE
+ * `formSuccess()` anywhere on a page that contains the form: when the Pro admin-ajax submit
+ * returns success, the form hides and the banner appears. Zero-height wrapper (carrier pattern).
+ */
+export const formSuccess = ({ message = 'Message sent.', sub = "We'll get back to you shortly.", accent = '#1a7f37' } = {}) => {
+  const id = freshId();
+  return {
+    id,
+    elType: 'widget',
+    widgetType: 'html',
+    settings: {
+      html:
+        `<style>.elementor-element-${id}{margin:0!important;height:0;line-height:0;overflow:visible}` +
+        `.exjsx-form-ok{display:none;padding:20px 24px;border:1px solid ${accent};border-radius:8px;text-align:center}` +
+        `.exjsx-form-ok b{display:block;font-size:18px;color:${accent};margin-bottom:4px}</style>` +
+        `<script>(function(){var of_=window.fetch;window.fetch=function(){return of_.apply(this,arguments).then(function(r){try{` +
+        `var u=String(arguments&&r.url||'');if(r.ok&&u.indexOf('admin-ajax')>-1){r.clone().json().then(function(j){if(j&&j.success)done();}).catch(function(){});}}catch(e){}return r;});};` +
+        `var ox=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){this.__exu=u;return ox.apply(this,arguments);};` +
+        `var os=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(){this.addEventListener('load',function(){try{` +
+        `if(String(this.__exu).indexOf('admin-ajax')>-1){var j=JSON.parse(this.responseText);if(j&&j.success)done();}}catch(e){}});return os.apply(this,arguments);};` +
+        `function done(){var f=document.querySelector('form');if(f){f.style.display='none';var b=document.createElement('div');b.className='exjsx-form-ok';` +
+        `b.style.display='block';b.innerHTML='<b>${message.replace(/'/g, "\\'")}</b>${sub.replace(/'/g, "\\'")}';f.parentNode.insertBefore(b,f);}}})();</script>`,
+    },
+    styles: {},
+    elements: [],
+  };
+};
+
 export const fontLoader = (family, weights = [400, 700]) => ({
   id: freshId(),
   elType: 'widget',

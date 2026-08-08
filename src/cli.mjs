@@ -230,5 +230,11 @@ export default ({ theme: t }) => (
 );
 `);
     console.log(`scaffolded ${dir}/\n  theme.mjs · site.config.mjs · pages/home.page.jsx\n\nnext:\n  exjsx build ${arg || 'site'}\n  WP_URL=… WP_USER=… WP_APP_PASSWORD=… exjsx deploy ${arg || 'site'}/${name}.bundle.json`);
-  } else console.log('usage: exjsx init [dir] | build <entry.jsx|project-dir> [out.json] [--inline] | deploy <bundle.json> [--dry] [--only <slug[,slug]>] [--force] | lint <entry.jsx|bundle.json> [--strict] | media <manifest.mjs> [map.json] | decompile <tree.json> [out.jsx] | inspect <bundle.json> [--page <slug>] [--el <id>]');
+  } else if (cmd === 'api') {
+    // the one-page API card — agents read THIS instead of grepping the source (field reality:
+    // every fresh agent spent ~4-5 min source-diving for signatures before this existed)
+    const { readFileSync: rf } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    console.log(rf(join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'API-CARD.md'), 'utf8'));
+  } else console.log('usage: exjsx init [dir] | api | build <entry.jsx|project-dir> [out.json] [--inline] | deploy <bundle.json> [--dry] [--only <slug[,slug]>] [--force] | lint <entry.jsx|bundle.json> [--strict] | media <manifest.mjs> [map.json] | decompile <tree.json> [out.jsx] | inspect <bundle.json> [--page <slug>] [--el <id>]');
 })().catch((e) => { console.error(e.message); process.exit(1); });

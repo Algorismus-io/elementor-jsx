@@ -21,7 +21,7 @@ export {
   abs, archConvex, archConcave, heading, para, button, image, imageUrl, textLink, divider,
   youtube, video, tabs, DYN, isDyn, dyn, IMG_DYN, interaction, interact, loopGrid, formInput,
   formTextarea, formSelect, formCheckbox, formLabel, formSubmit, field, form, normalizeFaValue,
-  faIcon, svgIcon, iconChip, hover, fontLoader
+  faIcon, svgIcon, iconChip, hover, fontLoader, formSuccess
 } from './kit/kit.mjs';
 
 export {

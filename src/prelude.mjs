@@ -16,7 +16,7 @@
  */
 export {
   h, Fragment, useTheme, useCtx, defineSite, fromData, defineTheme, sx, box, styled, bindClass,
-  css, clone, interact, fontLoader, col, row, grid, hugRow, hugCol, sect, hero, hamburgerNav,
+  css, clone, interact, fontLoader, formSuccess, col, row, grid, hugRow, hugCol, sect, hero, hamburgerNav,
   heading, para, button, image, imageUrl, textLink, divider, youtube, video, tabs, archConvex,
   archConcave, dyn, loopGrid, form, field, formInput, formTextarea, formSelect, formCheckbox,
   formLabel, formSubmit, EMAIL_ACTION, faIcon, svgIcon, iconChip, eyebrow, accentHeading,

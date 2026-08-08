@@ -9,7 +9,7 @@ import {
   freshId, node, css, clone, hover, assertTree,
   S, C, SZ, P0, HUG, IMG_URL,
   fx, col, row, grid, hugRow, hugCol, bar, sect, hero, abs, archConvex, archConcave,
-  heading, para, button, image, imageUrl, textLink, fontLoader, faIcon, normalizeFaValue, svgIcon, iconChip,
+  heading, para, button, image, imageUrl, textLink, fontLoader, formSuccess, faIcon, normalizeFaValue, svgIcon, iconChip,
 } from '../../src/kit/kit.mjs';
 import { resetIds, styleOf, deskProps, customCssOf, classRefs, allNodes } from '../helpers.mjs';
 
@@ -231,4 +231,17 @@ test('css(): chunk without trailing semicolon gets one (last-declaration-drop gu
   assert.match(customCssOf(n), /\}$/, 'brace-terminated chunk left alone');
   css(n, 'color:blue');
   assert.match(customCssOf(n), /color:blue;$/, 'merged chunk also terminated');
+});
+
+test('formSuccess: html carrier with fetch+XHR success hook, collapsed wrapper, custom copy', () => {
+  const f = formSuccess({ message: 'Logged!', sub: 'Six hours.', accent: '#00ff88' });
+  assert.equal(f.widgetType, 'html');
+  const h = f.settings.html;
+  assert.match(h, /window\.fetch/);
+  assert.match(h, /XMLHttpRequest\.prototype\.send/);
+  assert.match(h, /admin-ajax/);
+  assert.match(h, /Logged!/);
+  assert.match(h, /Six hours\./);
+  assert.match(h, /#00ff88/);
+  assert.match(h, new RegExp(`elementor-element-${f.id}\\{margin:0`), 'collapses its own wrapper');
 });
