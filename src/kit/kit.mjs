@@ -683,9 +683,16 @@ export const formLabel = (forId, text, p = {}) =>
   node('widget', { widgetType: 'e-form-label', settings: { tag: S('label'), text: HTML(text), 'input-id': S(forId) }, props: p });
 export const formSubmit = (text = 'Submit', p = {}) =>
   node('widget', { widgetType: 'e-form-submit-button', settings: { text: HTML(text), tag: S('button') }, props: p });
-/** label+input pair in a column — the everyday field group. `opts` go to the input (type/required/…). */
-export const field = (id, label, opts = {}, p = {}) =>
-  col({ gap: SZ(6), padding: P0, width: SZ(100, '%'), ...p }, [formLabel(id, label), formInput(id, opts)]);
+/** label+input pair in a column — the everyday field group. `opts` go to the input (type/required/…).
+ * `{ textarea: true, rows? }` routes to formTextarea (field-report: agents expect this spelling —
+ * it used to throw into the input-type enum). */
+export const field = (id, label, opts = {}, p = {}) => {
+  const { textarea, ...rest } = opts;
+  return col({ gap: SZ(6), padding: P0, width: SZ(100, '%'), ...p }, [
+    formLabel(id, label),
+    textarea ? formTextarea(id, rest) : formInput(id, rest),
+  ]);
+};
 
 /**
  * The e-form container element. actions: 'email' | 'collect-submissions' | 'webhook' (array).

@@ -47,15 +47,26 @@ Special props on all intrinsics: `tw=""` (Tailwind subset), `raw=""` (CSS decls,
 - `fontLoader('Family', [400,700])` — Google font; place FIRST in the tree. One per family.
 - `button(text, href, props)` — real href REQUIRED (no '#').
 - `divider(props)` · `tabs([{label,content}], {active})` · `youtube(url)` · `video(url)`
-- Forms (Pro): `form({ name, actions:['collect-submissions'], … }, [ field('name','Name'), field('email','Email',{type:'email'}), field('msg','Message',{textarea:true}) ])`
-  — **on Elementor 4.2.x + Pro 4.1.0 use `collect-submissions`, NOT `email`** (email action is
-  upstream-broken on that combo: validator and send-runner disagree). Submissions land in
-  `wp_e_submissions`. Add `formSuccess()` (html snippet) anywhere on the page for a visible
-  "sent" state — the atomic runner shows none.
+- Forms (Pro) — the COMPLETE recipe (all four parts required):
+  ```
+  form({ name:'contact', actions:['collect-submissions'] }, [
+    field('name', 'Name'),
+    field('email', 'Email', { type:'email' }),
+    field('msg', 'Message', { textarea:true, rows:5 }),
+    formSubmit('Send message'),          // ← form() does NOT add a submit button by itself
+  ])
+  ```
+  Input types: text|email|number|tel|password, or `textarea:true`. **Use `collect-submissions`,
+  NOT `email`, on Elementor 4.2.x + Pro 4.1.0** (email action upstream-broken: validator and
+  send-runner disagree). Submissions land in `wp_e_submissions`. Add `formSuccess()` anywhere on
+  the page for a visible "sent" state — the atomic runner shows none.
 - `formSuccess({ message, sub, accent })` — canned success banner: hides the form, shows the banner
   when the Pro ajax submit succeeds. One per page with a form.
 
 ## Layout gotchas (each cost a real run)
+
+- The prelude provides `Nav`/`Footer`/`Layout`… as BUILT-IN free vars — a project component named
+  `Nav` gets silently shadowed. Name yours `SiteNav`/`SiteFooter` and import them explicitly.
 
 - Row children get `flex:1` unless width-pinned — use `w:'hug'` for justify-between clusters.
 - Headings inside flex columns need `w:'100%'` or they shrink to max-content and overflow mobile.
@@ -73,6 +84,7 @@ Special props on all intrinsics: `tw=""` (Tailwind subset), `raw=""` (CSS decls,
 ```
 eu-studio verify --pages /,/about/ [--widths 1200,1512,390]   # structural matrix, one call
 eu-studio clicktest --form /contact/ --accordion /pricing/ --burger / --nav /=about
-eu-studio doctor            # health + auto-heal (css, class store)
+eu-studio doctor            # health + auto-heal; NAMES failing stylesheets — run this instead of
+                            # hand-grepping page HTML when styles look broken
 eu-studio carry-css --page <id> …   # make pages independent of a flaky css file store
 ```

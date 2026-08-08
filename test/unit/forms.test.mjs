@@ -109,3 +109,12 @@ test('form: a full contact form composes and passes assertTree', () => {
   ])];
   assert.doesNotThrow(() => assertTree(page));
 });
+
+test('field({textarea:true}) routes to e-form-textarea (field-report: used to throw into the input enum)', () => {
+  const f = field('msg', 'Message', { textarea: true, rows: 6 });
+  const kids = f.elements;
+  assert.equal(kids.length, 2);
+  assert.equal(kids[1].widgetType, 'e-form-textarea');
+  const plain = field('name', 'Name');
+  assert.equal(plain.elements[1].widgetType, 'e-form-input');
+});
