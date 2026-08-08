@@ -449,6 +449,22 @@ export const para = (text, p = {}) =>
 /** Real anchor button — href is REQUIRED (no "#"); href may be a dynamic url tag (dyn.postUrl()). */
 export const button = (text, href, p = {}) => {
   if (!href || href === '#') throw new Error(`button "${text}": a real href is required (got "${href}")`);
+  // p must be ATOMIC PROP ENVELOPES; every agent instinctively passes sx shorthand ({bg:'#a67c00'}),
+  // which lands as invalid class props and 400s the kit write MUCH later, far from this call site
+  // (field incident). Fail HERE, loudly, with the working recipes.
+  const isEnvelope = (v) => v && typeof v === 'object' && '$$type' in v;
+  // _t/_m are breakpoint variant maps (objects OF envelopes) — validate one level in
+  const bare = Object.entries(p).find(([k, v]) =>
+    k === '_t' || k === '_m'
+      ? !(v && typeof v === 'object' && Object.values(v).every(isEnvelope))
+      : !isEnvelope(v));
+  if (bare) {
+    throw new Error(
+      `button "${text}": props must be atomic envelopes, got plain value for "${bare[0]}". ` +
+        `For sx-styled buttons use box({...sx, tag:'a'},[…]) or a styled <text href="${href}">; ` +
+        `or wrap: button(text, href, sx({ ${bare[0]}: … })) with sx from the prelude.`,
+    );
+  }
   return node('widget', {
     widgetType: 'e-button',
     settings: { tag: S('a'), text: textContent(text), link: LINK(href) },

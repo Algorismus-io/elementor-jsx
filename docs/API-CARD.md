@@ -12,6 +12,7 @@ site/
   components/*.jsx       shared components (import-free — prelude provides the API as free vars)
   pages/home.page.jsx    export const meta = { title, slug?, seo?, template? }
                          export default ({ theme }) => <section>…</section>
+                         (token access: theme.spec.colors.* / theme.spec.fonts.*)
 ```
 
 Build/deploy: `exjsx build <dir>` → `exjsx deploy <bundle.json>` (idempotent; self-primes CSS;
@@ -45,7 +46,9 @@ Special props on all intrinsics: `tw=""` (Tailwind subset), `raw=""` (CSS decls,
 ## Kit helpers (free vars via prelude — no imports)
 
 - `fontLoader('Family', [400,700])` — Google font; place FIRST in the tree. One per family.
-- `button(text, href, props)` — real href REQUIRED (no '#').
+- `button(text, href, envelopeProps?)` — real href REQUIRED (no '#'). Third arg takes ATOMIC
+  ENVELOPES only (plain sx values throw with recipes) — for styled CTAs prefer a styled
+  `<text href>` anchor or `box({...sx, tag:'a'})`.
 - `divider(props)` · `tabs([{label,content}], {active})` · `youtube(url)` · `video(url)`
 - Forms (Pro) — the COMPLETE recipe (all four parts required):
   ```

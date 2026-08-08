@@ -214,7 +214,10 @@ export async function deployBundle(bundle, cfg = {}) {
       deleted = list.map((c) => c.id).filter((id) => id && !newIds.has(id));
     } catch { /* first deploy — nothing to clean */ }
     const res = await fetch(`${wpUrl}/wp-json/elementor/v1/global-classes`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: auth },
+      // X-EMCP-Allow-Mass-Delete: deploy OWNS the class namespace (orphan cleanup can legitimately
+      // delete most of a stale registry); the plugin's mass-deletion guard exists to stop the
+      // EDITOR's accidental store-wipe, not intentional registry replacement.
+      method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: auth, 'X-EMCP-Allow-Mass-Delete': '1' },
       body: JSON.stringify({ items: bundle.classes.items, order: bundle.classes.order, changes: { added: bundle.classes.order, deleted, modified: [] } }),
     });
     report.classes = res.ok ? bundle.classes.order.length : `ERR ${res.status}: ${(await res.text()).slice(0, 120)}`;
@@ -340,7 +343,9 @@ add_action( 'wp_head', function () {
     // SELF-PRIMING with retry: on PHP-WASM the first prime after a save races the CSS flush and
     // 500s CSS_PRIME_FAILED (retryable) — a settle + retry converts nearly all of those into
     // successes. Field agents were healing this by hand after every deploy; now the deploy owns it.
-    let primed = false;
+    let primed = cfg.fast === true; // --fast: skip self-prime — the post-deploy check's settle-visits
+                                    // regenerate each page's css (invalidated by the save) anyway;
+                                    // saves ~30-45s/page of WASM prime time in the deploy
     for (let attempt = 0; attempt < 3 && !primed; attempt++) {
       if (attempt) {
         // a real frontend render writes the global-<id> stylesheets that the programmatic dispatch
@@ -383,7 +388,7 @@ add_action( 'wp_head', function () {
   // Elementor DELETE the global css of EVERY page using a touched class — including pages this run
   // did not save (--only-filtered, drift-skipped). Those pages then serve 404/500 stylesheets until
   // someone visits them ("the css keeps fucking up"). Prime every bundle page that was NOT saved.
-  if (!cfg.dry && !plan.skipKit && bundle.classes?.order?.length && wpUrl) {
+  if (!cfg.dry && !cfg.fast && !plan.skipKit && bundle.classes?.order?.length && wpUrl) {
     const savedIds = new Set(report.pages.filter((p) => p.id && /^(updated|created)/.test(p.action || '')).map((p) => p.id));
     const unsaved = (bundle.pages || []).filter((p) => !plan.pages.includes(p) || report.pages.some((r) => r.slug === (p.slug || slugify(p.title)) && !savedIds.has(r.id)));
     for (const p of unsaved) {

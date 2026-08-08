@@ -65,6 +65,7 @@ async function build(entry) {
   else if (cmd === 'deploy') {
     const dry = process.argv.includes('--dry');
     const force = process.argv.includes('--force');
+    const fast = process.argv.includes('--fast');
     // --only=a,b OR --only a,b (value = next token, must exist and not be a flag)
     let only;
     const onlyEq = process.argv.find((a) => a.startsWith('--only='));
@@ -78,7 +79,7 @@ async function build(entry) {
       }
     }
     const bundle = JSON.parse(readFileSync(resolve(arg), 'utf8'));
-    const r = await deployBundle(bundle, { dry, force, only });
+    const r = await deployBundle(bundle, { dry, force, only , fast});
     // --only warnings (class-registry lag) surface in BOTH dry and real mode, on stderr
     for (const w of r.warnings || []) console.error(`WARN: ${w}`);
     if (dry) {

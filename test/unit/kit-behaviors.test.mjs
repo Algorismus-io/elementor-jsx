@@ -245,3 +245,9 @@ test('formSuccess: html carrier with fetch+XHR success hook, collapsed wrapper, 
   assert.match(h, /#00ff88/);
   assert.match(h, new RegExp(`elementor-element-${f.id}\\{margin:0`), 'collapses its own wrapper');
 });
+
+test('button: plain sx-shorthand props throw at the call site with the recipe (was a far-away kit-write 400)', () => {
+  assert.throws(() => button('Buy', '/buy/', { bg: '#a67c00' }), /sx-styled buttons|atomic envelopes/);
+  assert.doesNotThrow(() => button('Buy', '/buy/', { 'font-weight': S('600') }));
+  assert.doesNotThrow(() => button('Buy', '/buy/'));
+});
