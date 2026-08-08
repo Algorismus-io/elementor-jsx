@@ -217,7 +217,7 @@ export async function deployBundle(bundle, cfg = {}) {
       // X-EMCP-Allow-Mass-Delete: deploy OWNS the class namespace (orphan cleanup can legitimately
       // delete most of a stale registry); the plugin's mass-deletion guard exists to stop the
       // EDITOR's accidental store-wipe, not intentional registry replacement.
-      method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: auth, 'X-EMCP-Allow-Mass-Delete': '1' },
+      method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: auth, 'X-EMCP-Allow-Mass-Delete': '1', 'X-EMCP-Skip-Reprime': '1' },
       body: JSON.stringify({ items: bundle.classes.items, order: bundle.classes.order, changes: { added: bundle.classes.order, deleted, modified: [] } }),
     });
     report.classes = res.ok ? bundle.classes.order.length : `ERR ${res.status}: ${(await res.text()).slice(0, 120)}`;
