@@ -379,6 +379,26 @@ add_action( 'wp_head', function () {
     if (stampSource) entry.stampSource = stampSource;
     report.pages.push(entry);
   }
+  // 2b) COLLATERAL RE-PRIME (field root-cause 2026-08-08): the class-registry PUT above makes
+  // Elementor DELETE the global css of EVERY page using a touched class — including pages this run
+  // did not save (--only-filtered, drift-skipped). Those pages then serve 404/500 stylesheets until
+  // someone visits them ("the css keeps fucking up"). Prime every bundle page that was NOT saved.
+  if (!cfg.dry && !plan.skipKit && bundle.classes?.order?.length && wpUrl) {
+    const savedIds = new Set(report.pages.filter((p) => p.id && /^(updated|created)/.test(p.action || '')).map((p) => p.id));
+    const unsaved = (bundle.pages || []).filter((p) => !plan.pages.includes(p) || report.pages.some((r) => r.slug === (p.slug || slugify(p.title)) && !savedIds.has(r.id)));
+    for (const p of unsaved) {
+      const slug = p.slug || slugify(p.title);
+      try {
+        const q = await (await fetch(`${wpUrl}/wp-json/wp/v2/pages?slug=${slug}&status=publish,draft&_fields=id`, { headers: jhead })).json();
+        const id = Array.isArray(q) && q[0]?.id;
+        if (id && !savedIds.has(id)) {
+          const pr = await fetch(eu(`/documents/${id}/prime-css`), { method: 'POST', headers: jhead, body: '{}' }).catch(() => null);
+          report.collateralPrimed = [...(report.collateralPrimed || []), `${slug}#${id}${pr?.ok ? '' : ' (prime failed — visit the page or run doctor)'}`];
+        }
+      } catch { /* best-effort — doctor covers stragglers */ }
+    }
+  }
+
   // 3) THEME PARTS (header/footer) — Elementor Pro theme-builder templates, deployed via wp-cli
   //    (elementor_library has no REST surface). Recipe (live-verified 4.1.4 + Pro 4.1.0, works on
   //    block AND classic themes): elementor_library post + _elementor_edit_mode=builder +
