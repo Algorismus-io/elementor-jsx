@@ -238,12 +238,31 @@ export default ({ theme: t }) => (
   </box>
 );
 `);
-    console.log(`scaffolded ${dir}/\n  theme.mjs · site.config.mjs · pages/home.page.jsx\n\nnext:\n  exjsx build ${arg || 'site'}\n  WP_URL=… WP_USER=… WP_APP_PASSWORD=… exjsx deploy ${arg || 'site'}/${name}.bundle.json`);
+    console.log(`scaffolded ${dir}/\n  theme.mjs · site.config.mjs · pages/home.page.jsx\n\nnext:\n  exjsx build ${arg || 'site'}\n  WP_URL=… WP_USER=… WP_APP_PASSWORD=… exjsx deploy ${arg || 'site'}/${name}.bundle.json\n\nstarter prompts (paste into Claude Code / your agent):\n  "Read the exjsx API card (npx exjsx api), then build a hero section in pages/home.page.jsx and deploy."\n  "Restyle the theme tokens in theme.mjs to <your brand> and redeploy."`);
+  } else if (cmd === 'import') {
+    // exjsx import <url-or-html-file> --out <file>.page.jsx [--name <slug>] — computed-style
+    // capture bridge: render in headless Chrome, read computed styles, emit an editable page file.
+    const usage = () => { console.error('usage: exjsx import <url-or-html-file> --out <file>.page.jsx [--name <slug>]'); process.exit(2); };
+    if (!arg || arg.startsWith('--')) usage();
+    const opts = {};
+    for (const flag of ['--out', '--name']) {
+      const i = process.argv.indexOf(flag);
+      if (i === -1) continue;
+      const v = process.argv[i + 1];
+      if (!v || v.startsWith('--')) usage();
+      opts[flag.slice(2)] = v;
+    }
+    if (!opts.out) usage();
+    const { importPage } = await import('./import.mjs');
+    const r = await importPage(arg, opts);
+    console.log(`imported "${r.title}": ${r.stats.emitted} element(s) emitted (${r.stats.dropped} hidden dropped)`);
+    for (const nt of r.notes) console.log(`  note: ${nt}`);
+    console.log(`  page → ${r.out}`);
   } else if (cmd === 'api') {
     // the one-page API card — agents read THIS instead of grepping the source (field reality:
     // every fresh agent spent ~4-5 min source-diving for signatures before this existed)
     const { readFileSync: rf } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     console.log(rf(join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'API-CARD.md'), 'utf8'));
-  } else console.log('usage: exjsx init [dir] | api | build <entry.jsx|project-dir> [out.json] [--inline] | deploy <bundle.json> [--dry] [--only <slug[,slug]>] [--force] | lint <entry.jsx|bundle.json> [--strict] | media <manifest.mjs> [map.json] | decompile <tree.json> [out.jsx] | inspect <bundle.json> [--page <slug>] [--el <id>]');
+  } else console.log('usage: exjsx init [dir] | api | build <entry.jsx|project-dir> [out.json] [--inline] | deploy <bundle.json> [--dry] [--only <slug[,slug]>] [--force] | lint <entry.jsx|bundle.json> [--strict] | import <url-or-html-file> --out <file>.page.jsx [--name <slug>] | media <manifest.mjs> [map.json] | decompile <tree.json> [out.jsx] | inspect <bundle.json> [--page <slug>] [--el <id>]');
 })().catch((e) => { console.error(e.message); process.exit(1); });
