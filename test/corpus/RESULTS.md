@@ -1,28 +1,28 @@
 # tw corpus — pixel parity scoreboard
 
-Generated 2026-08-09T22:08:33.666Z · viewport 1280 · bench http://127.0.0.1:8931 · scores are mean |Δ| luminance (0–255)
+Generated 2026-08-09T22:14:15.798Z · viewport 1280 · bench http://127.0.0.1:8931 · scores are mean |Δ| luminance (0–255)
 over the common region of the reference (real Tailwind, Play CDN) and the exjsx render (real pipeline,
 `--inline`, free Elementor 4.2.1). Bands: ≤3 near-identical · 3–8 faithful · 8–20 visible · >20 structural.
 
 | component | score | band | skipped | worst band | Δheight | diagnosis (score > 8) |
 |---|---|---|---|---|---|---|
-| cruip-cta | 41.94 | structural | 16 | y=0 (71.38) | -134px | dark card is `before:bg-gray-900` + button gradient is `bg-linear-to-t from-/to-` — both out of tw scope (skipped), so the card renders white → luminance inversion; layout itself matches |
-| cruip-features | 127.19 | structural | 32 | y=0 (231) | 0px | entire dark theme (`before:bg-gray-900`), planet glow (before:/after: gradients) and per-cell padding/borders (`*:p-6`, `*:before:` child variants) are pseudo/child-combinator decoration tw declares out of scope — page renders light on white → worst score by construction, not a compile bug |
+| cruip-cta | 40.66 | structural | 16 | y=0 (71.38) | -134px | dark card is `before:bg-gray-900` + button gradient is `bg-linear-to-t from-/to-` — both out of tw scope (skipped), so the card renders white → luminance inversion; layout itself matches |
+| cruip-features | 126.26 | structural | 32 | y=0 (231) | 0px | entire dark theme (`before:bg-gray-900`), planet glow (before:/after: gradients) and per-cell padding/borders (`*:p-6`, `*:before:` child variants) are pseudo/child-combinator decoration tw declares out of scope — page renders light on white → worst score by construction, not a compile bug |
 | cruip-header | 5.22 | faithful | 13 | y=0 (5.82) | +20px |  |
-| cruip-hero | 15.73 | visible | 42 | y=250 (66.31) | 0px | reference hides the terminal lines (`[&_span]:opacity-0` reveal animation) and overlaps avatars (`-space-x-3`) — both skipped, so exjsx shows readable text and spread avatars; border-y gradient fades ([border-image:…--theme()] ) degrade to solid lines on both sides |
-| cruip-testimonial | 9.63 | visible | 5 | y=150 (42.25) | +11px | byline inline spans (`text-gray-700`/`text-blue-500` inside one line) flatten to a single uniform-color text (inline styled runs are out of exjsx's text model); quote-svg overlap offset drifts a few px |
-| hyperui-cta | 9.30 | visible | 3 | y=200 (14.24) | -5px | mean is dominated by the unsplash photo half: ~5px cumulative vertical drift (tw sizes don't carry Tailwind's paired line-heights → text block heights differ slightly) shifts the photo crop; left column is near-identical |
-| hyperui-faq | 8.09 | visible | 6 | y=50 (15.34) | -56px | closed-state chevrons can't rotate (`group-open:-rotate-180` skipped) and 2–5px item-height drift accumulates down the list; otherwise near-identical |
-| hyperui-feature-grid | 7.44 | faithful | 1 | y=300 (26.06) | -17px |  |
-| hyperui-footer | 4.86 | faithful | 2 | y=100 (24.28) | +21px |  |
-| hyperui-header | 3.35 | faithful | 0 | y=0 (4.11) | 0px |  |
-| hyperui-pricing | 5.33 | faithful | 22 | y=400 (13.28) | +13px |  |
-| hyperui-section | 5.33 | faithful | 0 | y=250 (11.61) | 0px |  |
-| hyperui-stats | 4.65 | faithful | 2 | y=50 (11.54) | -6px |  |
-| magicui-bento | 5.64 | faithful | 56 | y=250 (9.53) | -337px | score under-reports the real gap: `auto-rows-[22rem]` is skipped so bento rows collapse (Δheight −337px); card content, marquee and grid spans themselves are faithful — mask-image/dark:/group-hover: decoration skipped as designed |
-| shadcn-login-block | 4.02 | faithful | 6 | y=550 (14.19) | 0px |  |
+| cruip-hero | 13.89 | visible | 42 | y=250 (63.46) | 0px | reference hides the terminal lines (`[&_span]:opacity-0` reveal animation) and overlaps avatars (`-space-x-3`) — both skipped, so exjsx shows readable text and spread avatars; border-y gradient fades ([border-image:…--theme()] ) degrade to solid lines on both sides |
+| cruip-testimonial | 11.67 | visible | 5 | y=150 (41.62) | +26px | byline inline spans (`text-gray-700`/`text-blue-500` inside one line) flatten to a single uniform-color text (inline styled runs are out of exjsx's text model); quote-svg overlap offset drifts a few px |
+| hyperui-cta | 14.97 | visible | 3 | y=200 (22.07) | -8px | mean is dominated by the unsplash photo half: ~5px cumulative vertical drift (tw sizes don't carry Tailwind's paired line-heights → text block heights differ slightly) shifts the photo crop; left column is near-identical |
+| hyperui-faq | 7.57 | faithful | 6 | y=50 (15.34) | -56px | closed-state chevrons can't rotate (`group-open:-rotate-180` skipped) and 2–5px item-height drift accumulates down the list; otherwise near-identical |
+| hyperui-feature-grid | 3.56 | faithful | 1 | y=300 (22.29) | +8px |  |
+| hyperui-footer | 4.11 | faithful | 2 | y=100 (23.38) | +18px |  |
+| hyperui-header | 1.35 | near-identical | 0 | y=0 (1.73) | 0px |  |
+| hyperui-pricing | 6.14 | faithful | 22 | y=400 (17.45) | +23px |  |
+| hyperui-section | 6.91 | faithful | 0 | y=250 (15.77) | 0px |  |
+| hyperui-stats | 7.00 | faithful | 2 | y=250 (15.84) | -12px |  |
+| magicui-bento | 5.08 | faithful | 56 | y=250 (11.11) | -332px | score under-reports the real gap: `auto-rows-[22rem]` is skipped so bento rows collapse (Δheight −337px); card content, marquee and grid spans themselves are faithful — mask-image/dark:/group-hover: decoration skipped as designed |
+| shadcn-login-block | 2.27 | near-identical | 6 | y=550 (13.53) | 0px |  |
 
-Distribution: structural 2 · faithful 9 · visible 4 — mean of means 17.18.
+Distribution: structural 2 · faithful 8 · visible 3 · near-identical 2 — mean of means 17.11.
 
 ## Method notes (what the numbers mean)
 

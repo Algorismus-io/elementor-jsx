@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-09T22:08:33.666Z",
+  "generatedAt": "2026-08-09T22:14:15.798Z",
   "wp": "http://127.0.0.1:8931",
   "viewport": 1280,
   "bands": {
@@ -12,7 +12,7 @@
     {
       "name": "cruip-cta",
       "slug": "corpus-cruip-cta",
-      "score": 41.94,
+      "score": 40.66,
       "band": "structural",
       "worstBand": {
         "y": 0,
@@ -56,7 +56,7 @@
     {
       "name": "cruip-features",
       "slug": "corpus-cruip-features",
-      "score": 127.19,
+      "score": 126.26,
       "band": "structural",
       "worstBand": {
         "y": 0,
@@ -157,11 +157,11 @@
     {
       "name": "cruip-hero",
       "slug": "corpus-cruip-hero",
-      "score": 15.73,
+      "score": 13.89,
       "band": "visible",
       "worstBand": {
         "y": 250,
-        "mean": 66.31
+        "mean": 63.46
       },
       "refSize": [
         1280,
@@ -227,11 +227,11 @@
     {
       "name": "cruip-testimonial",
       "slug": "corpus-cruip-testimonial",
-      "score": 9.63,
+      "score": 11.67,
       "band": "visible",
       "worstBand": {
         "y": 150,
-        "mean": 42.25
+        "mean": 41.62
       },
       "refSize": [
         1280,
@@ -239,9 +239,9 @@
       ],
       "exSize": [
         1280,
-        353
+        368
       ],
-      "heightDelta": 11,
+      "heightDelta": 26,
       "flexRowFixups": 1,
       "skipped": [
         "inline <em>: italic",
@@ -260,11 +260,11 @@
     {
       "name": "hyperui-cta",
       "slug": "corpus-hyperui-cta",
-      "score": 9.3,
+      "score": 14.97,
       "band": "visible",
       "worstBand": {
         "y": 200,
-        "mean": 14.24
+        "mean": 22.07
       },
       "refSize": [
         1280,
@@ -272,9 +272,9 @@
       ],
       "exSize": [
         1280,
-        447
+        444
       ],
-      "heightDelta": -5,
+      "heightDelta": -8,
       "flexRowFixups": 0,
       "skipped": [
         "focus:ring-2",
@@ -294,8 +294,8 @@
     {
       "name": "hyperui-faq",
       "slug": "corpus-hyperui-faq",
-      "score": 8.09,
-      "band": "visible",
+      "score": 7.57,
+      "band": "faithful",
       "worstBand": {
         "y": 50,
         "mean": 15.34
@@ -328,11 +328,11 @@
     {
       "name": "hyperui-feature-grid",
       "slug": "corpus-hyperui-feature-grid",
-      "score": 7.44,
+      "score": 3.56,
       "band": "faithful",
       "worstBand": {
         "y": 300,
-        "mean": 26.06
+        "mean": 22.29
       },
       "refSize": [
         1280,
@@ -340,9 +340,9 @@
       ],
       "exSize": [
         1280,
-        417
+        442
       ],
-      "heightDelta": -17,
+      "heightDelta": 8,
       "flexRowFixups": 3,
       "skipped": [
         "text-3xl/tight"
@@ -357,11 +357,11 @@
     {
       "name": "hyperui-footer",
       "slug": "corpus-hyperui-footer",
-      "score": 4.86,
+      "score": 4.11,
       "band": "faithful",
       "worstBand": {
         "y": 100,
-        "mean": 24.28
+        "mean": 23.38
       },
       "refSize": [
         1280,
@@ -369,9 +369,9 @@
       ],
       "exSize": [
         1280,
-        690
+        687
       ],
-      "heightDelta": 21,
+      "heightDelta": 18,
       "flexRowFixups": 6,
       "skipped": [
         "focus-within:ring-3",
@@ -387,11 +387,11 @@
     {
       "name": "hyperui-header",
       "slug": "corpus-hyperui-header",
-      "score": 3.35,
-      "band": "faithful",
+      "score": 1.35,
+      "band": "near-identical",
       "worstBand": {
         "y": 0,
-        "mean": 4.11
+        "mean": 1.73
       },
       "refSize": [
         1280,
@@ -414,11 +414,11 @@
     {
       "name": "hyperui-pricing",
       "slug": "corpus-hyperui-pricing",
-      "score": 5.33,
+      "score": 6.14,
       "band": "faithful",
       "worstBand": {
         "y": 400,
-        "mean": 13.28
+        "mean": 17.45
       },
       "refSize": [
         1280,
@@ -426,9 +426,9 @@
       ],
       "exSize": [
         1280,
-        577
+        587
       ],
-      "heightDelta": 13,
+      "heightDelta": 23,
       "flexRowFixups": 10,
       "skipped": [
         "ring-1",
@@ -464,11 +464,11 @@
     {
       "name": "hyperui-section",
       "slug": "corpus-hyperui-section",
-      "score": 5.33,
+      "score": 6.91,
       "band": "faithful",
       "worstBand": {
         "y": 250,
-        "mean": 11.61
+        "mean": 15.77
       },
       "refSize": [
         1280,
@@ -491,11 +491,11 @@
     {
       "name": "hyperui-stats",
       "slug": "corpus-hyperui-stats",
-      "score": 4.65,
+      "score": 7,
       "band": "faithful",
       "worstBand": {
-        "y": 50,
-        "mean": 11.54
+        "y": 250,
+        "mean": 15.84
       },
       "refSize": [
         1280,
@@ -503,9 +503,9 @@
       ],
       "exSize": [
         1280,
-        374
+        368
       ],
-      "heightDelta": -6,
+      "heightDelta": -12,
       "flexRowFixups": 0,
       "skipped": [
         "mg-6",
@@ -521,11 +521,11 @@
     {
       "name": "magicui-bento",
       "slug": "corpus-magicui-bento",
-      "score": 5.64,
+      "score": 5.08,
       "band": "faithful",
       "worstBand": {
         "y": 250,
-        "mean": 9.53
+        "mean": 11.11
       },
       "refSize": [
         1280,
@@ -533,9 +533,9 @@
       ],
       "exSize": [
         1280,
-        423
+        428
       ],
-      "heightDelta": -337,
+      "heightDelta": -332,
       "flexRowFixups": 8,
       "skipped": [
         "auto-rows-[22rem]",
@@ -654,11 +654,11 @@
     {
       "name": "shadcn-login-block",
       "slug": "corpus-shadcn-login-block",
-      "score": 4.02,
-      "band": "faithful",
+      "score": 2.27,
+      "band": "near-identical",
       "worstBand": {
         "y": 550,
-        "mean": 14.19
+        "mean": 13.53
       },
       "refSize": [
         1280,

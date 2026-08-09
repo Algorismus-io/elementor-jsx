@@ -59,8 +59,11 @@ const CASES = [
   ['w rem unit → raw', 'w-[20rem]', { raw: 'width: 20rem;' }],
 
   // ── typography ──
-  ['named text size', 'text-lg', { size: 18 }],
-  ['text-5xl', 'text-5xl', { size: 48 }],
+  ['named text size', 'text-lg', { size: 18, lh: 28 }], // Tailwind pairs 18/28 — size alone drifted every corpus component
+  ['text-5xl', 'text-5xl', { size: 48, lh: 1 }],
+  ['leading wins over paired lh (either order)', 'leading-tight text-lg', { size: 18, lh: 1.25 }],
+  ['bare flex is a ROW like Tailwind', 'flex gap-4', { display: 'flex', dir: 'row', gap: 16 }],
+  ['flex-col still wins', 'flex flex-col', { display: 'flex', dir: 'column' }],
   ['text alignment', 'text-center', { ta: 'center' }],
   ['text color named', 'text-white', { color: '#ffffff' }],
   ['text color arbitrary', 'text-[#0A2230]', { color: '#0A2230' }],

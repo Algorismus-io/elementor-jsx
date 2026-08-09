@@ -29,7 +29,10 @@ import { PALETTE } from './tw-palette.mjs';
 
 const SCALE = 4;
 
-const TEXT_SIZES = { xs: 12, sm: 14, base: 16, lg: 18, xl: 20, '2xl': 24, '3xl': 30, '4xl': 36, '5xl': 48, '6xl': 60, '7xl': 72, '8xl': 96, '9xl': 128 };
+/* Tailwind pairs every named size with a line-height (text-3xl = 30/36) — emitting the size
+ * alone drifted EVERY corpus component 2-6px vertically per text block (the harness's top
+ * fidelity drain). [size, lineHeight]; ≥5xl Tailwind uses lh 1 (em). */
+const TEXT_SIZES = { xs: [12, 16], sm: [14, 20], base: [16, 24], lg: [18, 28], xl: [20, 28], '2xl': [24, 32], '3xl': [30, 36], '4xl': [36, 40], '5xl': [48, 1], '6xl': [60, 1], '7xl': [72, 1], '8xl': [96, 1], '9xl': [128, 1] };
 const WEIGHTS = { thin: 100, extralight: 200, light: 300, normal: 400, medium: 500, semibold: 600, bold: 700, extrabold: 800, black: 900 };
 const LEADING = { none: 1, tight: 1.25, snug: 1.375, normal: 1.5, relaxed: 1.625, loose: 2 };
 const TRACKING = { tighter: -0.05, tight: -0.025, normal: 0, wide: 0.025, wider: 0.05, widest: 0.1 };
@@ -129,7 +132,12 @@ function parseBucket(tokens) {
     switch (true) {
       /* ── display / flex / grid ── */
       case tok === 'flex' || tok === 'grid' || tok === 'block' || tok === 'inline-block' || tok === 'inline-flex' || tok === 'inline':
-        o.display = tok; break;
+        o.display = tok;
+        // Tailwind's `flex` means flex-direction:row; box() defaults to column — without this,
+        // bare `flex` silently stacked children (62 occurrences across the corpus rendered
+        // vertical). flex-col/flex-row in either order still wins.
+        if ((tok === 'flex' || tok === 'inline-flex') && o.dir === undefined) o.dir = 'row';
+        break;
       case tok === 'hidden': o.display = 'none'; break;
       case tok === 'flex-row' || tok === 'flex-row-reverse': o.dir = tok.slice(5); break;
       case tok === 'flex-col': o.dir = 'column'; break;
@@ -226,7 +234,12 @@ function parseBucket(tokens) {
 
       /* ── typography ── */
       case !!(m = tok.match(/^text-(left|center|right|justify|start|end)$/)): o.ta = m[1]; break;
-      case TEXT_SIZES[tok.slice(5)] != null && tok.startsWith('text-'): o.size = TEXT_SIZES[tok.slice(5)]; break;
+      case TEXT_SIZES[tok.slice(5)] != null && tok.startsWith('text-'): {
+        const [sz, lh] = TEXT_SIZES[tok.slice(5)];
+        o.size = sz;
+        if (o.lh === undefined) o.lh = lh; // an explicit leading-* (either order) wins
+        break;
+      }
       case !!(m = tok.match(/^text-\[(.+)\]$/)):
         if (isColor(m[1])) o.color = m[1];
         else { const v = arbLen(m[1], tok); if (typeof v === 'number') o.size = v; else R(`font-size: ${v.css ?? v};`); }
