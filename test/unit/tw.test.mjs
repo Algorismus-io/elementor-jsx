@@ -8,6 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { twToSx, mergeTw } from '../../src/tw.mjs';
+import { PALETTE } from '../../src/tw-palette.mjs';
 import { sx } from '../../src/kit/kit-components.mjs';
 import { h, renderPage } from '../../src/runtime.mjs';
 import { S, SZ, DIM, M, PDIM, RAD, BG, SHADOW } from '../../src/kit/kit.mjs';
@@ -93,6 +94,95 @@ const CASES = [
   ['overflow → raw', 'overflow-hidden', { raw: 'overflow: hidden;' }],
   ['aspect-video → raw', 'aspect-video', { raw: 'aspect-ratio: 16 / 9;' }],
   ['transition utilities are accepted no-ops', 'transition duration-300 ease-in-out', {}],
+
+  // ── bundled palette (tw-palette.mjs) + /NN opacity modifier ──
+  ['palette text color', 'text-slate-500', { color: '#64748b' }],
+  ['palette bg color', 'bg-gray-900', { bg: '#111827' }],
+  ['palette bg 50 shade', 'bg-gray-50', { bg: '#f9fafb' }],
+  ['palette border joins width → sx border pair', 'border border-gray-200', { border: [1, '#e5e7eb'] }],
+  ['palette border color alone → raw border-color', 'border-blue-500', { raw: 'border-color: #3b82f6;' }],
+  ['opacity modifier on named color', 'bg-white/90', { bg: 'rgba(255, 255, 255, 0.9)' }],
+  ['opacity modifier on palette color', 'text-slate-500/75', { color: 'rgba(100, 116, 139, 0.75)' }],
+  ['fill palette → raw', 'fill-blue-500', { raw: 'fill: #3b82f6;' }],
+  ['stroke palette → raw', 'stroke-red-600', { raw: 'stroke: #dc2626;' }],
+
+  // ── size-* → w+h ──
+  ['size on scale → w+h', 'size-5', { w: 20, h: 20 }],
+  ['size-full', 'size-full', { w: '100%', h: '100%' }],
+  ['size arbitrary', 'size-[18px]', { w: 18, h: 18 }],
+
+  // ── arbitrary properties ──
+  ['arbitrary property (underscores → spaces)', '[background-size:200%_100%]', { raw: 'background-size: 200% 100%;' }],
+  ['arbitrary property mask-image', '[mask-image:linear-gradient(to_top,transparent_40%,#000_100%)]',
+    { raw: 'mask-image: linear-gradient(to top,transparent 40%,#000 100%);' }],
+  ['arbitrary property keeps underscores inside url()', '[mask-image:url(/img/my_mask.png)]',
+    { raw: 'mask-image: url(/img/my_mask.png);' }],
+
+  // ── transforms: composed into ONE transform: per bucket ──
+  ['scale → transform', 'scale-105', { raw: 'transform: scale(1.05);' }],
+  ['negative rotate', '-rotate-180', { raw: 'transform: rotate(-180deg);' }],
+  ['negative translate fraction', '-translate-x-1/2', { raw: 'transform: translateX(-50%);' }],
+  ['translate on the px scale', 'translate-x-0.5', { raw: 'transform: translateX(2px);' }],
+  ['transform parts compose in token order', 'scale-90 -translate-y-1/2 rotate-45',
+    { raw: 'transform: scale(0.9) translateY(-50%) rotate(45deg);' }],
+  ['transform/transform-gpu are no-ops', 'transform transform-gpu', {}],
+
+  // ── negative offsets / z / margins ──
+  ['-top offset', '-top-20', { raw: 'top: -80px;' }],
+  ['-inset', '-inset-5', { raw: 'inset: -20px;' }],
+  ['positive inset on scale', 'inset-4', { raw: 'inset: 16px;' }],
+  ['-z index', '-z-10', { raw: 'z-index: -10;' }],
+  ['negative margin stays ATOMIC (envelope takes negative px)', '-mt-4', { m: { t: -16 } }],
+  ['negative axis margin', '-mx-2', { m: { r: -8, l: -8 } }],
+
+  // ── fixed raw combos ──
+  ['sr-only → the standard 8-declaration block', 'sr-only',
+    { raw: 'position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0;' }],
+  ['antialiased', 'antialiased', { raw: '-webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;' }],
+  ['box-content / box-border', 'box-content', { raw: 'box-sizing: content-box;' }],
+  ['pointer-events-auto', 'pointer-events-auto', { raw: 'pointer-events: auto;' }],
+  ['border-none → raw border-style', 'border-none', { raw: 'border-style: none;' }],
+  ['border-y per-side raw', 'border-y',
+    { raw: 'border-top-width: 1px; border-top-style: solid; border-bottom-width: 1px; border-bottom-style: solid;' }],
+  ['border-b-2 per-side width', 'border-b-2', { raw: 'border-bottom-width: 2px; border-bottom-style: solid;' }],
+  ['border-y + palette color → sides + border-color', 'border-y border-gray-100',
+    { raw: 'border-top-width: 1px; border-top-style: solid; border-bottom-width: 1px; border-bottom-style: solid; border-color: #f3f4f6;' }],
+  ['border arbitrary px width joins color', 'border-[20px] border-[#e2e8f0]', { border: [20, '#e2e8f0'] }],
+  ['shadow-xs alias (v4 rename of old sm)', 'shadow-xs', { shadow: [1, 2, 0, 'rgba(0,0,0,0.05)'] }],
+  ['text-balance → raw text-wrap', 'text-balance', { raw: 'text-wrap: balance;' }],
+  ['text-pretty → raw text-wrap', 'text-pretty', { raw: 'text-wrap: pretty;' }],
+  ['underline-offset is direct px', 'underline-offset-4', { raw: 'text-underline-offset: 4px;' }],
+  ['max-w-prose = 65ch', 'max-w-prose', { raw: 'max-width: 65ch;' }],
+  ['bg keywords → size/position/repeat (not the color path)', 'bg-cover bg-center bg-no-repeat',
+    { raw: 'background-size: cover; background-position: center; background-repeat: no-repeat;' }],
+  ['divide-y → owl child combinator', 'divide-y', { raw: '& > * + * { border-top-width: 1px; border-top-style: solid; }' }],
+  ['space-y on the scale', 'space-y-4', { raw: '& > * + * { margin-top: 16px; }' }],
+  ['space-x', 'space-x-2', { raw: '& > * + * { margin-left: 8px; }' }],
+  ['blur → filter', 'blur-3xl', { raw: 'filter: blur(64px);' }],
+  ['filter parts compose into ONE filter:', 'blur-sm brightness-110 grayscale',
+    { raw: 'filter: blur(4px) brightness(1.1) grayscale(100%);' }],
+  ['backdrop-blur → backdrop-filter', 'backdrop-blur-md', { raw: 'backdrop-filter: blur(12px);' }],
+  ['ms-/me- logical margins', 'ms-2 me-4', { raw: 'margin-inline-start: 8px; margin-inline-end: 16px;' }],
+  ['h-dvh', 'h-dvh', { raw: 'height: 100dvh;' }],
+  ['min-h-svh', 'min-h-svh', { raw: 'min-height: 100svh;' }],
+
+  // ── animate/group accepted no-ops (static render — keyframes/group state don't exist in atomic output) ──
+  ['animate-* and group are no-ops', 'group animate-pulse animate-[float_4s_ease-in-out_infinite]', {}],
+
+  // ── BUGFIX: bg-[length:…] is Tailwind's background-size disambiguator, not CSS ──
+  ['bg-[length:…] → background-size (was invalid background:)', 'bg-[length:100%_100%]', { raw: 'background-size: 100% 100%;' }],
+  ['bg-[bottom] stays background shorthand', 'bg-[bottom]', { raw: 'background: bottom;' }],
+
+  // ── hover:/focus: → raw state blocks ──
+  ['hover on a raw-able utility', 'hover:opacity-75', { raw: '&:hover { opacity: 0.75; }' }],
+  ['hover on an atomic-only prop routes its CSS to raw', 'hover:bg-slate-900', { raw: '&:hover { background: #0f172a; }' }],
+  ['hover palette color with opacity modifier', 'hover:text-gray-500/75', { raw: '&:hover { color: rgba(107, 114, 128, 0.75); }' }],
+  ['hover underline', 'hover:underline', { raw: '&:hover { text-decoration: underline; }' }],
+  ['hover transform', 'hover:scale-105', { raw: '&:hover { transform: scale(1.05); }' }],
+  ['hover bg-[length:…] bugfix applies inside states', 'hover:bg-[length:100%_150%]', { raw: '&:hover { background-size: 100% 150%; }' }],
+  ['focus block', 'focus:bg-white', { raw: '&:focus { background: #ffffff; }' }],
+  ['base raw + hover block concatenate (base first)', 'uppercase hover:opacity-75',
+    { raw: 'text-transform: uppercase; &:hover { opacity: 0.75; }' }],
 ];
 
 for (const [name, input, expected] of CASES) {
@@ -100,6 +190,25 @@ for (const [name, input, expected] of CASES) {
     assert.deepEqual(twToSx(input), expected);
   });
 }
+
+/* ── palette table integrity: 22 families × 11 shades, all hex ── */
+test('tw-palette: full default palette, every shade a 6-digit hex', () => {
+  const families = Object.keys(PALETTE);
+  assert.equal(families.length, 22);
+  for (const fam of families) {
+    const shades = Object.keys(PALETTE[fam]).map(Number).sort((a, b) => a - b);
+    assert.deepEqual(shades, [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950], `${fam} shade set`);
+    for (const [s, hex] of Object.entries(PALETTE[fam])) {
+      assert.match(hex, /^#[0-9a-f]{6}$/, `${fam}-${s}`);
+    }
+  }
+  // spot-check canonical anchors (the shades agents reach for most)
+  assert.equal(PALETTE.slate[500], '#64748b');
+  assert.equal(PALETTE.gray[700], '#374151');
+  assert.equal(PALETTE.blue[500], '#3b82f6');
+  assert.equal(PALETTE.emerald[600], '#059669');
+  assert.equal(PALETTE.rose[950], '#4c0519');
+});
 
 /* ── breakpoints: desktop-first ── */
 test('tw: base is desktop; max-lg → tablet; max-md → mobile', () => {
@@ -113,13 +222,20 @@ test('tw: literal tablet:/mobile: prefixes also work', () => {
 
 /* ── loud failures ── */
 const THROWS = [
-  ['palette bg color', 'bg-blue-500', /palette colors are not bundled.*bg-\[#/],
-  ['palette text color', 'text-slate-600', /palette colors are not bundled/],
+  ['theme-var bg color (shadcn) names the utility, not the palette recipe', 'bg-primary', /unsupported bg-\* utility.*bg-\[#0ea5e9\]/],
+  ['theme-var text color', 'text-primary', /unsupported text-\* utility.*text-\[#hex\]/],
   ['mobile-first prefix', 'md:flex', /mobile-first breakpoints are not supported/],
-  ['hover state', 'hover:bg-black', /state variants are not supported/],
+  ['group-hover state', 'group-hover:opacity-100', /beyond hover:\/focus:/],
+  ['hover on a layout prop', 'hover:flex', /layout changes on hover go through raw/],
   ['unknown utility', 'foo-bar', /unknown utility.*"foo-bar"/],
   ['compound gradient', 'bg-gradient-to-r', /grad=\{\[angle/],
-  ['negative margin', '-mt-4', /negative margins/],
+  ['v4 linear gradient', 'bg-linear-to-t', /grad=\{\[angle/],
+  ['negative margin in non-px units', '-mt-[2rem]', /negative margins take the px scale/],
+  ['ring utilities', 'ring-2', /unknown utility/],
+  ['arbitrary property with build-time theme()',
+    '[border-image:linear-gradient(to_right,transparent,--theme(--color-slate-300/.8),transparent)1]',
+    /theme\(\) only exists at Tailwind build time/],
+  ['arbitrary selector', '[&_summary::-webkit-details-marker]:hidden', /unknown utility/],
   ['raw fallback inside a breakpoint bucket', 'max-md:uppercase', /desktop-only/],
 ];
 for (const [name, input, re] of THROWS) {
@@ -188,6 +304,17 @@ test('tw e2e: typography + shadow + responsive variants', () => {
   assert.deepEqual(out['letter-spacing'], SZ(0.02, 'em'));
   assert.deepEqual(out['box-shadow'], SHADOW(10, 15, -3, 'rgba(0,0,0,0.1)'));
   assert.deepEqual(out._m, { 'font-size': SZ(32) });
+});
+
+test('tw e2e: palette colors + size-* compile to verified envelopes', () => {
+  const out = sx(mergeTw({ tw: 'bg-slate-900 size-10' }));
+  assert.deepEqual(out.background, BG('#0f172a'));
+  assert.deepEqual(out.width, SZ(40));
+  assert.deepEqual(out.height, SZ(40));
+});
+test('tw e2e: negative margins survive the dimensions envelope atomically', () => {
+  const out = sx(mergeTw({ tw: '-mt-4 -mx-2' }));
+  assert.deepEqual(out.margin, PDIM({ t: -16, r: -8, l: -8 }));
 });
 
 /* ── sx aliases: standard CSS names (added alongside tw) ── */
