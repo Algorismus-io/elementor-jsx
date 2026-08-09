@@ -11,6 +11,7 @@
     "build": "node src/cli.mjs build",
     "deploy": "node src/cli.mjs deploy",
     "test": "node --test test/unit/*.test.mjs",
+    "corpus": "node test/corpus/run.mjs",
     "test:it": "EXJSX_IT=1 node --test --test-concurrency=1 'test/integration/*.test.mjs'",
     "test:all": "npm test && npm run test:it",
     "prepublishOnly": "npm test"

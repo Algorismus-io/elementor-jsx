@@ -1,0 +1,9 @@
+{
+  "cruip-cta": "dark card is `before:bg-gray-900` + button gradient is `bg-linear-to-t from-/to-` — both out of tw scope (skipped), so the card renders white → luminance inversion; layout itself matches",
+  "cruip-features": "entire dark theme (`before:bg-gray-900`), planet glow (before:/after: gradients) and per-cell padding/borders (`*:p-6`, `*:before:` child variants) are pseudo/child-combinator decoration tw declares out of scope — page renders light on white → worst score by construction, not a compile bug",
+  "cruip-hero": "reference hides the terminal lines (`[&_span]:opacity-0` reveal animation) and overlaps avatars (`-space-x-3`) — both skipped, so exjsx shows readable text and spread avatars; border-y gradient fades ([border-image:…--theme()] ) degrade to solid lines on both sides",
+  "cruip-testimonial": "byline inline spans (`text-gray-700`/`text-blue-500` inside one line) flatten to a single uniform-color text (inline styled runs are out of exjsx's text model); quote-svg overlap offset drifts a few px",
+  "hyperui-cta": "mean is dominated by the unsplash photo half: ~5px cumulative vertical drift (tw sizes don't carry Tailwind's paired line-heights → text block heights differ slightly) shifts the photo crop; left column is near-identical",
+  "hyperui-faq": "closed-state chevrons can't rotate (`group-open:-rotate-180` skipped) and 2–5px item-height drift accumulates down the list; otherwise near-identical",
+  "magicui-bento": "score under-reports the real gap: `auto-rows-[22rem]` is skipped so bento rows collapse (Δheight −337px); card content, marquee and grid spans themselves are faithful — mask-image/dark:/group-hover: decoration skipped as designed"
+}

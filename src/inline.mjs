@@ -25,7 +25,7 @@ const MEDIA = { desktop: null, tablet: 'max-width:1024px', mobile: 'max-width:76
 export function inlineLocal(bundle) {
   const items = bundle.classes?.items || {};
   const SALT = djb2(bundle.name || 'pg');
-  const rawByBp = { desktop: [], tablet: [], mobile: [] };
+  let rawByBp = { desktop: [], tablet: [], mobile: [] };
   let inlined = 0, rawRules = 0;
 
   const collectRaw = (sid, variants) => {
@@ -61,23 +61,28 @@ export function inlineLocal(bundle) {
     }
     (n.elements || []).forEach(walk);
   };
-  for (const p of bundle.pages) p.elements.forEach(walk);
-
-  let cssText = rawByBp.desktop.join('');
-  for (const bp of ['tablet', 'mobile']) {
-    if (rawByBp[bp].length) cssText += `@media(${MEDIA[bp]}){${rawByBp[bp].join('')}}`;
-  }
-  if (cssText && bundle.pages[0]) {
+  // PER PAGE: each page carries its OWN raw-rules <style> widget. The single-shot version pushed
+  // one style block with EVERY page's rules into pages[0] only — visitors of pages 2..N never
+  // loaded their raw CSS (space-y owls, text-transform, per-side borders, transforms all silently
+  // gone; found by the tw-corpus pixel-parity harness, 2026-08-10).
+  bundle.pages.forEach((p, pi) => {
+    rawByBp = { desktop: [], tablet: [], mobile: [] };
+    p.elements.forEach(walk);
+    let cssText = rawByBp.desktop.join('');
+    for (const bp of ['tablet', 'mobile']) {
+      if (rawByBp[bp].length) cssText += `@media(${MEDIA[bp]}){${rawByBp[bp].join('')}}`;
+    }
+    if (!cssText) return;
     // the carrier widget is zero-height but still gets Elementor's DEFAULT 20px widget
     // bottom-margin — which pushed every inline page down 20px and exposed the theme's body
     // background as a dark strip at the top (field-found on /discord-safety/). The stylesheet
     // collapses its own wrapper by data-id.
-    const wid = `erawcss${SALT}`;
-    bundle.pages[0].elements.unshift({
+    const wid = `erawcss${SALT}${pi ? pi : ''}`;
+    p.elements.unshift({
       id: wid, elType: 'widget', widgetType: 'html',
-      settings: { html: `<style id="exjsx-raw-${SALT}">.elementor-element-${wid}{margin:0 !important;height:0;line-height:0;}${cssText}</style>` }, styles: {}, elements: [],
+      settings: { html: `<style id="exjsx-raw-${SALT}-${pi}">.elementor-element-${wid}{margin:0 !important;height:0;line-height:0;}${cssText}</style>` }, styles: {}, elements: [],
     });
-  }
+  });
   const dropped = Object.keys(items).length;
   bundle.classes = { items: {}, order: [] };
   // plain JSON boolean — the deploy verb round-trips the bundle through bundle.json, so the marker

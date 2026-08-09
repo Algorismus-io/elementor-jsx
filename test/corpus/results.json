@@ -1,0 +1,692 @@
+{
+  "generatedAt": "2026-08-09T22:08:33.666Z",
+  "wp": "http://127.0.0.1:8931",
+  "viewport": 1280,
+  "bands": {
+    "near-identical": "≤3",
+    "faithful": "3–8",
+    "visible": "8–20",
+    "structural": ">20"
+  },
+  "components": [
+    {
+      "name": "cruip-cta",
+      "slug": "corpus-cruip-cta",
+      "score": 41.94,
+      "band": "structural",
+      "worstBand": {
+        "y": 0,
+        "mean": 71.38
+      },
+      "refSize": [
+        1280,
+        576
+      ],
+      "exSize": [
+        1280,
+        442
+      ],
+      "heightDelta": -134,
+      "flexRowFixups": 1,
+      "skipped": [
+        "before:pointer-events-none",
+        "before:absolute",
+        "before:inset-0",
+        "before:-z-10",
+        "before:rounded-2xl",
+        "before:bg-gray-900",
+        "[border-image:linear-gradient(to_right,transparent,--theme(--color-slate-700/.7),transparent)1]",
+        "btn",
+        "bg-linear-to-t",
+        "from-blue-600",
+        "to-blue-500",
+        "inline <span>: ml-1",
+        "inline <span>: tracking-normal",
+        "inline <span>: text-blue-300",
+        "inline <span>: transition-transform",
+        "inline <span>: group-hover:translate-x-0.5"
+      ],
+      "inactive": [],
+      "diagnosis": "dark card is `before:bg-gray-900` + button gradient is `bg-linear-to-t from-/to-` — both out of tw scope (skipped), so the card renders white → luminance inversion; layout itself matches",
+      "shots": {
+        "ref": "shots/cruip-cta.ref.png",
+        "ex": "shots/cruip-cta.ex.png"
+      }
+    },
+    {
+      "name": "cruip-features",
+      "slug": "corpus-cruip-features",
+      "score": 127.19,
+      "band": "structural",
+      "worstBand": {
+        "y": 0,
+        "mean": 231
+      },
+      "refSize": [
+        1280,
+        900
+      ],
+      "exSize": [
+        1280,
+        900
+      ],
+      "heightDelta": 0,
+      "flexRowFixups": 7,
+      "skipped": [
+        "before:absolute",
+        "before:inset-0",
+        "before:-z-20",
+        "before:bg-gray-900",
+        "before:absolute",
+        "before:inset-0",
+        "before:-z-10",
+        "before:scale-[.85]",
+        "before:animate-[pulse_4s_cubic-bezier(.4,0,.6,1)_infinite]",
+        "before:bg-linear-to-b",
+        "before:from-blue-900",
+        "before:to-sky-700/50",
+        "before:blur-3xl",
+        "after:absolute",
+        "after:inset-0",
+        "after:rounded-[inherit]",
+        "after:[background:radial-gradient(closest-side,var(--color-blue-500),transparent)]",
+        "*:relative",
+        "*:p-6",
+        "*:before:absolute",
+        "*:before:bg-gray-800",
+        "*:before:[block-size:100vh]",
+        "*:before:[inline-size:1px]",
+        "*:before:[inset-block-start:0]",
+        "*:before:[inset-inline-start:-1px]",
+        "*:after:absolute",
+        "*:after:bg-gray-800",
+        "*:after:[block-size:1px]",
+        "*:after:[inline-size:100vw]",
+        "*:after:[inset-block-start:-1px]",
+        "*:after:[inset-inline-start:0]",
+        "md:*:p-10"
+      ],
+      "inactive": [],
+      "diagnosis": "entire dark theme (`before:bg-gray-900`), planet glow (before:/after: gradients) and per-cell padding/borders (`*:p-6`, `*:before:` child variants) are pseudo/child-combinator decoration tw declares out of scope — page renders light on white → worst score by construction, not a compile bug",
+      "shots": {
+        "ref": "shots/cruip-features.ref.png",
+        "ex": "shots/cruip-features.ex.png"
+      }
+    },
+    {
+      "name": "cruip-header",
+      "slug": "corpus-cruip-header",
+      "score": 5.22,
+      "band": "faithful",
+      "worstBand": {
+        "y": 0,
+        "mean": 5.82
+      },
+      "refSize": [
+        1280,
+        56
+      ],
+      "exSize": [
+        1280,
+        76
+      ],
+      "heightDelta": 20,
+      "flexRowFixups": 4,
+      "skipped": [
+        "shadow-black/[0.03]",
+        "backdrop-blur-xs",
+        "before:pointer-events-none",
+        "before:absolute",
+        "before:inset-0",
+        "before:rounded-[inherit]",
+        "before:border",
+        "before:border-transparent",
+        "before:[background:linear-gradient(var(--color-gray-100),var(--color-gray-200))_border-box]",
+        "before:[mask-composite:exclude_!important]",
+        "before:[mask:linear-gradient(white_0_0)_padding-box,_linear-gradient(white_0_0)]",
+        "btn-sm",
+        "btn-sm"
+      ],
+      "inactive": [],
+      "diagnosis": null,
+      "shots": {
+        "ref": "shots/cruip-header.ref.png",
+        "ex": "shots/cruip-header.ex.png"
+      }
+    },
+    {
+      "name": "cruip-hero",
+      "slug": "corpus-cruip-hero",
+      "score": 15.73,
+      "band": "visible",
+      "worstBand": {
+        "y": 250,
+        "mean": 66.31
+      },
+      "refSize": [
+        1280,
+        900
+      ],
+      "exSize": [
+        1280,
+        900
+      ],
+      "heightDelta": 0,
+      "flexRowFixups": 4,
+      "skipped": [
+        "[border-image:linear-gradient(to_right,transparent,--theme(--color-slate-300/.8),transparent)1]",
+        "-space-x-3",
+        "[border-image:linear-gradient(to_right,transparent,--theme(--color-slate-300/.8),transparent)1]",
+        "before:absolute",
+        "before:inset-0",
+        "before:border-y",
+        "before:[border-image:linear-gradient(to_right,transparent,--theme(--color-slate-300/.8),transparent)1]",
+        "btn",
+        "bg-linear-to-t",
+        "from-blue-600",
+        "to-blue-500",
+        "inline <span>: ml-1",
+        "inline <span>: tracking-normal",
+        "inline <span>: text-blue-300",
+        "inline <span>: transition-transform",
+        "inline <span>: group-hover:translate-x-0.5",
+        "btn",
+        "before:pointer-events-none",
+        "before:absolute",
+        "before:-inset-5",
+        "before:border-y",
+        "before:[border-image:linear-gradient(to_right,transparent,--theme(--color-slate-300/.8),transparent)1]",
+        "after:absolute",
+        "after:-inset-5",
+        "after:-z-10",
+        "after:border-x",
+        "after:[border-image:linear-gradient(to_bottom,transparent,--theme(--color-slate-300/.8),transparent)1]",
+        "before:block",
+        "before:h-[9px]",
+        "before:w-[41px]",
+        "before:bg-[length:16px_9px]",
+        "before:[background-image:radial-gradient(circle_at_4.5px_4.5px,var(--color-gray-600)_4.5px,transparent_0)]",
+        "after:w-[41px]",
+        "[&_span]:opacity-0",
+        "inline <span>: animate-[code-1_10s_infinite]",
+        "inline <span>: text-gray-200",
+        "inline <span>: animate-[code-2_10s_infinite]",
+        "inline <span>: animate-[code-3_10s_infinite]",
+        "inline <span>: animate-[code-4_10s_infinite]",
+        "inline <span>: animate-[code-5_10s_infinite]",
+        "inline <span>: text-gray-200",
+        "inline <span>: animate-[code-6_10s_infinite]"
+      ],
+      "inactive": [],
+      "diagnosis": "reference hides the terminal lines (`[&_span]:opacity-0` reveal animation) and overlaps avatars (`-space-x-3`) — both skipped, so exjsx shows readable text and spread avatars; border-y gradient fades ([border-image:…--theme()] ) degrade to solid lines on both sides",
+      "shots": {
+        "ref": "shots/cruip-hero.ref.png",
+        "ex": "shots/cruip-hero.ex.png"
+      }
+    },
+    {
+      "name": "cruip-testimonial",
+      "slug": "corpus-cruip-testimonial",
+      "score": 9.63,
+      "band": "visible",
+      "worstBand": {
+        "y": 150,
+        "mean": 42.25
+      },
+      "refSize": [
+        1280,
+        342
+      ],
+      "exSize": [
+        1280,
+        353
+      ],
+      "heightDelta": 11,
+      "flexRowFixups": 1,
+      "skipped": [
+        "inline <em>: italic",
+        "inline <em>: text-gray-500",
+        "inline <span>: text-gray-700",
+        "inline <span>: text-gray-400",
+        "inline <a>: text-blue-500"
+      ],
+      "inactive": [],
+      "diagnosis": "byline inline spans (`text-gray-700`/`text-blue-500` inside one line) flatten to a single uniform-color text (inline styled runs are out of exjsx's text model); quote-svg overlap offset drifts a few px",
+      "shots": {
+        "ref": "shots/cruip-testimonial.ref.png",
+        "ex": "shots/cruip-testimonial.ex.png"
+      }
+    },
+    {
+      "name": "hyperui-cta",
+      "slug": "corpus-hyperui-cta",
+      "score": 9.3,
+      "band": "visible",
+      "worstBand": {
+        "y": 200,
+        "mean": 14.24
+      },
+      "refSize": [
+        1280,
+        452
+      ],
+      "exSize": [
+        1280,
+        447
+      ],
+      "heightDelta": -5,
+      "flexRowFixups": 0,
+      "skipped": [
+        "focus:ring-2",
+        "focus:ring-yellow-400",
+        "focus:outline-hidden"
+      ],
+      "inactive": [
+        "ltr:sm:text-left",
+        "rtl:sm:text-right"
+      ],
+      "diagnosis": "mean is dominated by the unsplash photo half: ~5px cumulative vertical drift (tw sizes don't carry Tailwind's paired line-heights → text block heights differ slightly) shifts the photo crop; left column is near-identical",
+      "shots": {
+        "ref": "shots/hyperui-cta.ref.png",
+        "ex": "shots/hyperui-cta.ex.png"
+      }
+    },
+    {
+      "name": "hyperui-faq",
+      "slug": "corpus-hyperui-faq",
+      "score": 8.09,
+      "band": "visible",
+      "worstBand": {
+        "y": 50,
+        "mean": 15.34
+      },
+      "refSize": [
+        1280,
+        346
+      ],
+      "exSize": [
+        1280,
+        290
+      ],
+      "heightDelta": -56,
+      "flexRowFixups": 3,
+      "skipped": [
+        "[&_summary::-webkit-details-marker]:hidden",
+        "group-open:-rotate-180",
+        "[&_summary::-webkit-details-marker]:hidden",
+        "group-open:-rotate-180",
+        "[&_summary::-webkit-details-marker]:hidden",
+        "group-open:-rotate-180"
+      ],
+      "inactive": [],
+      "diagnosis": "closed-state chevrons can't rotate (`group-open:-rotate-180` skipped) and 2–5px item-height drift accumulates down the list; otherwise near-identical",
+      "shots": {
+        "ref": "shots/hyperui-faq.ref.png",
+        "ex": "shots/hyperui-faq.ex.png"
+      }
+    },
+    {
+      "name": "hyperui-feature-grid",
+      "slug": "corpus-hyperui-feature-grid",
+      "score": 7.44,
+      "band": "faithful",
+      "worstBand": {
+        "y": 300,
+        "mean": 26.06
+      },
+      "refSize": [
+        1280,
+        434
+      ],
+      "exSize": [
+        1280,
+        417
+      ],
+      "heightDelta": -17,
+      "flexRowFixups": 3,
+      "skipped": [
+        "text-3xl/tight"
+      ],
+      "inactive": [],
+      "diagnosis": null,
+      "shots": {
+        "ref": "shots/hyperui-feature-grid.ref.png",
+        "ex": "shots/hyperui-feature-grid.ex.png"
+      }
+    },
+    {
+      "name": "hyperui-footer",
+      "slug": "corpus-hyperui-footer",
+      "score": 4.86,
+      "band": "faithful",
+      "worstBand": {
+        "y": 100,
+        "mean": 24.28
+      },
+      "refSize": [
+        1280,
+        669
+      ],
+      "exSize": [
+        1280,
+        690
+      ],
+      "heightDelta": 21,
+      "flexRowFixups": 6,
+      "skipped": [
+        "focus-within:ring-3",
+        "focus:ring-transparent"
+      ],
+      "inactive": [],
+      "diagnosis": null,
+      "shots": {
+        "ref": "shots/hyperui-footer.ref.png",
+        "ex": "shots/hyperui-footer.ex.png"
+      }
+    },
+    {
+      "name": "hyperui-header",
+      "slug": "corpus-hyperui-header",
+      "score": 3.35,
+      "band": "faithful",
+      "worstBand": {
+        "y": 0,
+        "mean": 4.11
+      },
+      "refSize": [
+        1280,
+        64
+      ],
+      "exSize": [
+        1280,
+        64
+      ],
+      "heightDelta": 0,
+      "flexRowFixups": 5,
+      "skipped": [],
+      "inactive": [],
+      "diagnosis": null,
+      "shots": {
+        "ref": "shots/hyperui-header.ref.png",
+        "ex": "shots/hyperui-header.ex.png"
+      }
+    },
+    {
+      "name": "hyperui-pricing",
+      "slug": "corpus-hyperui-pricing",
+      "score": 5.33,
+      "band": "faithful",
+      "worstBand": {
+        "y": 400,
+        "mean": 13.28
+      },
+      "refSize": [
+        1280,
+        564
+      ],
+      "exSize": [
+        1280,
+        577
+      ],
+      "heightDelta": 13,
+      "flexRowFixups": 10,
+      "skipped": [
+        "ring-1",
+        "ring-indigo-600",
+        "inline <span>: sr-only",
+        "inline <strong>: text-3xl",
+        "inline <strong>: font-bold",
+        "inline <strong>: text-gray-900",
+        "inline <strong>: sm:text-4xl",
+        "inline <span>: text-sm",
+        "inline <span>: font-medium",
+        "inline <span>: text-gray-700",
+        "hover:ring-1",
+        "hover:ring-indigo-700",
+        "inline <span>: sr-only",
+        "inline <strong>: text-3xl",
+        "inline <strong>: font-bold",
+        "inline <strong>: text-gray-900",
+        "inline <strong>: sm:text-4xl",
+        "inline <span>: text-sm",
+        "inline <span>: font-medium",
+        "inline <span>: text-gray-700",
+        "hover:ring-1",
+        "hover:ring-indigo-600"
+      ],
+      "inactive": [],
+      "diagnosis": null,
+      "shots": {
+        "ref": "shots/hyperui-pricing.ref.png",
+        "ex": "shots/hyperui-pricing.ex.png"
+      }
+    },
+    {
+      "name": "hyperui-section",
+      "slug": "corpus-hyperui-section",
+      "score": 5.33,
+      "band": "faithful",
+      "worstBand": {
+        "y": 250,
+        "mean": 11.61
+      },
+      "refSize": [
+        1280,
+        459
+      ],
+      "exSize": [
+        1280,
+        459
+      ],
+      "heightDelta": 0,
+      "flexRowFixups": 0,
+      "skipped": [],
+      "inactive": [],
+      "diagnosis": null,
+      "shots": {
+        "ref": "shots/hyperui-section.ref.png",
+        "ex": "shots/hyperui-section.ex.png"
+      }
+    },
+    {
+      "name": "hyperui-stats",
+      "slug": "corpus-hyperui-stats",
+      "score": 4.65,
+      "band": "faithful",
+      "worstBand": {
+        "y": 50,
+        "mean": 11.54
+      },
+      "refSize": [
+        1280,
+        380
+      ],
+      "exSize": [
+        1280,
+        374
+      ],
+      "heightDelta": -6,
+      "flexRowFixups": 0,
+      "skipped": [
+        "mg-6",
+        "divide-gray-100"
+      ],
+      "inactive": [],
+      "diagnosis": null,
+      "shots": {
+        "ref": "shots/hyperui-stats.ref.png",
+        "ex": "shots/hyperui-stats.ex.png"
+      }
+    },
+    {
+      "name": "magicui-bento",
+      "slug": "corpus-magicui-bento",
+      "score": 5.64,
+      "band": "faithful",
+      "worstBand": {
+        "y": 250,
+        "mean": 9.53
+      },
+      "refSize": [
+        1280,
+        760
+      ],
+      "exSize": [
+        1280,
+        423
+      ],
+      "heightDelta": -337,
+      "flexRowFixups": 8,
+      "skipped": [
+        "auto-rows-[22rem]",
+        "bg-background",
+        "border-gray-950/[.1]",
+        "bg-gray-950/[.01]",
+        "hover:bg-gray-950/[.05]",
+        "border-gray-950/[.1]",
+        "bg-gray-950/[.01]",
+        "hover:bg-gray-950/[.05]",
+        "border-gray-950/[.1]",
+        "bg-gray-950/[.01]",
+        "hover:bg-gray-950/[.05]",
+        "border-gray-950/[.1]",
+        "bg-gray-950/[.01]",
+        "hover:bg-gray-950/[.05]",
+        "border-gray-950/[.1]",
+        "bg-gray-950/[.01]",
+        "hover:bg-gray-950/[.05]",
+        "lg:group-hover:-translate-y-10",
+        "origin-left",
+        "group-hover:scale-75",
+        "group-hover:translate-y-0",
+        "group-hover:opacity-100",
+        "group-hover:translate-y-0",
+        "group-hover:opacity-100",
+        "group-hover:bg-black/3",
+        "bg-background",
+        "group-hover:scale-90",
+        "lg:group-hover:-translate-y-10",
+        "origin-left",
+        "group-hover:scale-75",
+        "group-hover:translate-y-0",
+        "group-hover:opacity-100",
+        "group-hover:translate-y-0",
+        "group-hover:opacity-100",
+        "group-hover:bg-black/3",
+        "bg-background",
+        "group-hover:scale-105",
+        "lg:group-hover:-translate-y-10",
+        "origin-left",
+        "group-hover:scale-75",
+        "group-hover:translate-y-0",
+        "group-hover:opacity-100",
+        "group-hover:translate-y-0",
+        "group-hover:opacity-100",
+        "group-hover:bg-black/3",
+        "bg-background",
+        "origin-top",
+        "group-hover:scale-90",
+        "lg:group-hover:-translate-y-10",
+        "origin-left",
+        "group-hover:scale-75",
+        "group-hover:translate-y-0",
+        "group-hover:opacity-100",
+        "group-hover:translate-y-0",
+        "group-hover:opacity-100",
+        "group-hover:bg-black/3"
+      ],
+      "inactive": [
+        "dark:bg-background",
+        "dark:[box-shadow:0_-20px_80px_-20px_#ffffff1f_inset]",
+        "dark:[border:1px_solid_rgba(255,255,255,.1)]",
+        "dark:border-gray-50/[.1]",
+        "dark:bg-gray-50/[.10]",
+        "dark:hover:bg-gray-50/[.15]",
+        "dark:text-white",
+        "dark:border-gray-50/[.1]",
+        "dark:bg-gray-50/[.10]",
+        "dark:hover:bg-gray-50/[.15]",
+        "dark:text-white",
+        "dark:border-gray-50/[.1]",
+        "dark:bg-gray-50/[.10]",
+        "dark:hover:bg-gray-50/[.15]",
+        "dark:text-white",
+        "dark:border-gray-50/[.1]",
+        "dark:bg-gray-50/[.10]",
+        "dark:hover:bg-gray-50/[.15]",
+        "dark:text-white",
+        "dark:border-gray-50/[.1]",
+        "dark:bg-gray-50/[.10]",
+        "dark:hover:bg-gray-50/[.15]",
+        "dark:text-white",
+        "dark:text-neutral-300",
+        "rtl:rotate-180",
+        "rtl:rotate-180",
+        "group-hover:dark:bg-neutral-800/10",
+        "dark:bg-background",
+        "dark:[box-shadow:0_-20px_80px_-20px_#ffffff1f_inset]",
+        "dark:[border:1px_solid_rgba(255,255,255,.1)]",
+        "dark:text-neutral-300",
+        "rtl:rotate-180",
+        "rtl:rotate-180",
+        "group-hover:dark:bg-neutral-800/10",
+        "dark:bg-background",
+        "dark:[box-shadow:0_-20px_80px_-20px_#ffffff1f_inset]",
+        "dark:[border:1px_solid_rgba(255,255,255,.1)]",
+        "dark:text-neutral-300",
+        "rtl:rotate-180",
+        "rtl:rotate-180",
+        "group-hover:dark:bg-neutral-800/10",
+        "dark:bg-background",
+        "dark:[box-shadow:0_-20px_80px_-20px_#ffffff1f_inset]",
+        "dark:[border:1px_solid_rgba(255,255,255,.1)]",
+        "dark:text-neutral-300",
+        "rtl:rotate-180",
+        "rtl:rotate-180",
+        "group-hover:dark:bg-neutral-800/10"
+      ],
+      "diagnosis": "score under-reports the real gap: `auto-rows-[22rem]` is skipped so bento rows collapse (Δheight −337px); card content, marquee and grid spans themselves are faithful — mask-image/dark:/group-hover: decoration skipped as designed",
+      "shots": {
+        "ref": "shots/magicui-bento.ref.png",
+        "ex": "shots/magicui-bento.ex.png"
+      }
+    },
+    {
+      "name": "shadcn-login-block",
+      "slug": "corpus-shadcn-login-block",
+      "score": 4.02,
+      "band": "faithful",
+      "worstBand": {
+        "y": 550,
+        "mean": 14.19
+      },
+      "refSize": [
+        1280,
+        900
+      ],
+      "exSize": [
+        1280,
+        900
+      ],
+      "heightDelta": 0,
+      "flexRowFixups": 10,
+      "skipped": [
+        "bg-primary",
+        "text-primary-foreground",
+        "text-muted-foreground",
+        "inline <a>: underline",
+        "inline <a>: underline-offset-4",
+        "bg-muted"
+      ],
+      "inactive": [
+        "dark:brightness-[0.2]",
+        "dark:grayscale"
+      ],
+      "diagnosis": null,
+      "shots": {
+        "ref": "shots/shadcn-login-block.ref.png",
+        "ex": "shots/shadcn-login-block.ex.png"
+      }
+    }
+  ]
+}
