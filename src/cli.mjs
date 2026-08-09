@@ -62,6 +62,13 @@ async function build(entry) {
 
 (async () => {
   if (cmd === 'build') { await build(arg); }
+  else if (cmd === 'dev') {
+    if (!arg) { console.error('usage: exjsx dev <project-dir> [--port 4477]  (WP_URL/WP_USER/WP_APP_PASSWORD env)'); process.exit(2); }
+    const pi = process.argv.indexOf('--port');
+    const { dev } = await import('./dev.mjs');
+    await dev(arg, { port: pi !== -1 ? Number(process.argv[pi + 1]) : 4477 });
+    await new Promise(() => {}); // hold the process for the watcher
+  }
   else if (cmd === 'deploy') {
     const dry = process.argv.includes('--dry');
     const force = process.argv.includes('--force');
