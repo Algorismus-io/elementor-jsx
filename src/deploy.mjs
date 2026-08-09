@@ -213,15 +213,43 @@ export async function deployBundle(bundle, cfg = {}) {
       const newIds = new Set(bundle.classes.order);
       deleted = list.map((c) => c.id).filter((id) => id && !newIds.has(id));
     } catch { /* first deploy — nothing to clean */ }
+    // FOREIGN-STORE guard: orphan cleanup assumes the site was built from THIS project. Deploying a
+    // small side bundle (a probe page, a one-off) to an occupied site made "orphan cleanup" delete
+    // the resident site's entire registry — 123 classes replaced by 4, every page unstyled (real
+    // incident, 2026-08-09, and deploy's own Allow-Mass-Delete header waved it past the plugin
+    // guard built for exactly this). If we'd delete more than we declare, the store isn't ours:
+    // MERGE (keep the residents, add/update ours) unless --own-classes forces old semantics.
+    let items = bundle.classes.items, order = bundle.classes.order, merged = 0;
+    if (!cfg.ownClasses && deleted.length >= 5 && deleted.length > bundle.classes.order.length) {
+      const foreign = {};
+      try {
+        let cursor = '';
+        do {
+          const pg = await (await fetch(`${wpUrl}/wp-json/elementor-ultra/v1/design/classes?per_page=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: { Authorization: auth } })).json();
+          const d = pg?.data || pg;
+          for (const it of d?.items || []) if (it?.id && it.variants) foreign[it.id] = it;
+          cursor = d?.next_cursor || '';
+        } while (cursor);
+      } catch { /* no plugin route — fall through to the throw below */ }
+      const gotAll = deleted.every((id) => foreign[id]);
+      if (!gotAll) {
+        throw new Error(`deploy: this site's class store holds ${deleted.length} classes this bundle doesn't declare — it looks like another project lives here, and the full store couldn't be read for a safe merge. Deploy to a fresh site, or pass --own-classes to intentionally replace the store.`);
+      }
+      items = { ...Object.fromEntries(deleted.map((id) => [id, foreign[id]])), ...bundle.classes.items };
+      order = [...deleted, ...bundle.classes.order.filter((id) => !foreign[id])];
+      merged = deleted.length;
+      deleted = [];
+    }
     const res = await fetch(`${wpUrl}/wp-json/elementor/v1/global-classes`, {
       // X-EMCP-Allow-Mass-Delete: deploy OWNS the class namespace (orphan cleanup can legitimately
       // delete most of a stale registry); the plugin's mass-deletion guard exists to stop the
       // EDITOR's accidental store-wipe, not intentional registry replacement.
       method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: auth, 'X-EMCP-Allow-Mass-Delete': '1', 'X-EMCP-Skip-Reprime': '1' },
-      body: JSON.stringify({ items: bundle.classes.items, order: bundle.classes.order, changes: { added: bundle.classes.order, deleted, modified: [] } }),
+      body: JSON.stringify({ items, order, changes: { added: bundle.classes.order, deleted, modified: [] } }),
     });
     report.classes = res.ok ? bundle.classes.order.length : `ERR ${res.status}: ${(await res.text()).slice(0, 120)}`;
     report.orphansDeleted = deleted.length;
+    if (merged) report.classesMerged = `${merged} resident class(es) preserved (foreign store — use --own-classes to replace)`;
   }
 
   // 1c) collection loops need the hidden dev experiment `e_pro_collection_loop` — enable it BEFORE

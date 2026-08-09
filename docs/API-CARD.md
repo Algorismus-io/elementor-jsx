@@ -36,16 +36,30 @@ Special props on all intrinsics: `tw=""` (Tailwind subset), `raw=""` (CSS decls,
 
 ## sx style props (on any intrinsic / box())
 
-`w h` (number px | `'N%'` | `'hug'` | `'auto'`) · `maxw minh` · `pad m` (number | `[v,h]` | `[t,r,b,l]` | `{t,r,b,l}` partial) ·
-`gap` · `dir` (`'row'|'column'` — `'col'` throws) · `align justify wrap center` · `display` · `flex` · `pos` ·
+Sizes (`w h maxw minh gap size radius pad m`): number = px, or a unit string `'N<unit>'` with
+px/%/em/rem/vw/vh/ch — units are honored (`maxw="88vw"` really is 88vw). `w h` also take `'hug'`/`'auto'`.
+Anything else (`calc()`, `clamp()`, keywords, two-value gap) THROWS — put it in `raw=`.
+`pad m` also take `[v,h]` | `[t,r,b,l]` | `{t,r,b,l}` partial | `'0 auto'` strings ·
+`dir` (`'row'|'column'` — `'col'` throws) · `align justify wrap center` · `display` · `flex` · `pos` ·
 `span` · `gridCols` (e.g. `'repeat(3, 360px)'` — add `raw="justify-content:center;"` or grids left-pin) ·
-`color bg` (hex) · `bgImage` (url|id) `bgOpts` · `grad` (CSS gradient string) · `border` (`[w,'#color']` — bare number = width!) ·
-`borderColor radius shadow` · `size weight font lh ls ta` (**`lh`/`ls` are EM not px** — `ls={-1}` collapses a headline!) ·
+`color bg` (hex — NOT gradient strings) · `bgImage` (url|id) `bgOpts` · `grad` (**array `[angle, from, to]`**,
+e.g. `grad={[135,'#0ff','#f0f']}` — a CSS gradient STRING throws; freeform gradients go in `raw="background-image:…;"`) ·
+`border` (`[w,'#color']` — bare number = width!) · `borderColor radius shadow` ·
+`size weight font lh ls ta` (bare-number `lh`≤4 and `ls` read as EM — `ls={-1}` collapses a headline;
+explicit units are honored: `lh="150%"`, `ls="2px"`) ·
 `z`/`zIndex` · `fit` (object-fit) · `tablet={{…}} mobile={{…}}` (breakpoint overrides) · `sx={{…}}` (merge extra) · `props` (raw envelopes).
 
 ## Kit helpers (free vars via prelude — no imports)
 
-- `fontLoader('Family', [400,700])` — Google font; place FIRST in the tree. One per family.
+- **Fonts load natively**: any Google font named in a style prop (`font=` / sx `font-family`) is
+  enqueued by Elementor itself on render (`elementor-gf-*` link) — do NOT add `fontLoader()` for
+  those (it double-loads). `fontLoader('Family', [400,700])` (place FIRST in the tree, one per
+  family) is ONLY for families Elementor can't see: fonts referenced solely inside raw `html`
+  widgets or `raw=` CSS.
+- `navBar({logo, links:[[label,href],…], ctas, accent, ink})` — complete header (desktop rail +
+  dropdown mega-menus + mobile hamburger) as ONE self-contained html widget: immune to the
+  burger-steals-a-flex-slot bug by construction. Start here for navs; hand-roll only when the
+  design demands it — and then follow the burger-wrapper gotcha below religiously.
 - `button(text, href, envelopeProps?)` — real href REQUIRED (no '#'). Third arg takes ATOMIC
   ENVELOPES only (plain sx values throw with recipes) — for styled CTAs prefer a styled
   `<text href>` anchor or `box({...sx, tag:'a'})`.
@@ -72,6 +86,17 @@ Special props on all intrinsics: `tw=""` (Tailwind subset), `raw=""` (CSS decls,
   `Nav` gets silently shadowed. Name yours `SiteNav`/`SiteFooter` and import them explicitly.
 
 - Row children get `flex:1` unless width-pinned — use `w:'hug'` for justify-between clusters.
+- A hidden-on-desktop mobile burger must hide its WIDGET, not just its button: a bare `<html>`
+  widget as the 3rd child of a `justify="space-between"` header still occupies the right flex slot
+  even when its inner button is `display:none` — the links rail gets CENTERED, not right-pinned
+  (invisible at 1200, glaring ≥1512; broke 8 of 10 batch sites). Wrap it:
+  `<box w="hug" pad={0} display="none" mobile={{display:'flex'}}><html raw={...}/></box>`.
+- Size units (`%`/`vw`/`vh`/`em`/`rem`/`ch`) are honored on all size props; unknown values throw
+  at build time. `calc()`/`clamp()`/keywords still go through `raw=`.
+- Class-only `display:grid` loses to Elementor's atomic flex CSS printed later in the body — set
+  `display`/grid props via sx (atomic), keep only extras (auto-rows, dense, bleed) in `raw`.
+- Text inside rotated/transformed cards needs explicit width (`w:'100%'` inner, fixed card width) —
+  hug-width paragraphs in tilted containers collapse to one word per line.
 - Headings inside flex columns need `w:'100%'` or they shrink to max-content and overflow mobile.
 - Build width-general: absolutes `left:calc(50% ± Npx)` (never fixed `left:Npx`), grids centered.
 - Absolute `<img>` inside an `html` widget needs `max-width:none` (theme clamps to wrapper width).

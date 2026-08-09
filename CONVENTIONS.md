@@ -69,9 +69,12 @@ raw blocks are also invisible to the class dedup.
   never re-declare hex. One-off accents may be literals.
 - `mode:'var'` makes text color/font LIVE-editable in Elementor (variables); backgrounds degrade
   to literals automatically (4.1.4 limitation — the compiler handles it, don't work around it).
-- Every non-system `font-family` must be loaded: `fontLoader('Poppins',[400,700])` first in the
-  tree, or a theme font. An unloaded font falls back silently and every measurement you made is
-  wrong. [`font-not-loaded`]
+- Google fonts named in style props (`font=`) load NATIVELY — Elementor enqueues an
+  `elementor-gf-<family>` stylesheet on render (verified live 2026-08-09), so no `fontLoader()`
+  there (adding one double-loads). The exception: a family referenced ONLY inside raw `html`
+  widgets or `raw=` CSS is invisible to Elementor's enqueue and falls back silently (every
+  measurement you made is then wrong) — set it via a style prop somewhere, or add
+  `fontLoader('Family',[400,700])` first in the tree. [`font-not-loaded`]
 
 ## 4. Components
 

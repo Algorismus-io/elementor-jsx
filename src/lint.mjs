@@ -63,7 +63,46 @@ const ATOMIC_DECLS = new Set([
 ]);
 const GENERIC_FONT = /-apple-system|system-ui|BlinkMacSystemFont|sans-serif|serif|monospace|ui-sans|ui-serif|ui-mono/i;
 
+/* Envelope validity: a $$type envelope whose value can't be what the schema demands ships a
+ * silent 400 (or renders nothing). Incident: grad="linear-gradient(…)" string-spread into
+ * GRAD('l','i','n') — angle 'l' sailed through to the server and died there; bg:"linear-gradient"
+ * shipped a gradient string inside a color envelope and rendered nothing. Post-compile lint is
+ * the last line for hand-built/decompiled bundles too. */
+const SIZE_UNITS = new Set(['px', '%', 'em', 'rem', 'vw', 'vh', 'ch', 'vmin', 'vmax', 'deg', 'rad', 's', 'ms', 'auto', 'custom']);
+const COLORISH = /^(#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\(|oklch\(|color-mix\(|var\(|currentcolor$|transparent$|[a-zA-Z]{3,25}$)/;
+function* walkEnvelopes(v, path = '') {
+  if (!v || typeof v !== 'object') return;
+  if (typeof v.$$type === 'string') yield { env: v, path };
+  const inner = v.value !== undefined ? v.value : v;
+  if (Array.isArray(inner)) { for (let i = 0; i < inner.length; i++) yield* walkEnvelopes(inner[i], `${path}[${i}]`); }
+  else if (inner && typeof inner === 'object') { for (const [k, sub] of Object.entries(inner)) yield* walkEnvelopes(sub, path ? `${path}.${k}` : k); }
+}
+
 const RULES = [
+  {
+    id: 'invalid-envelope', severity: 'error',
+    run(bundle) {
+      const out = [];
+      for (const { owner, props } of allStyleProps(bundle)) {
+        for (const [prop, root] of Object.entries(props)) {
+          for (const { env, path } of walkEnvelopes(root, prop)) {
+            const at = `${owner} ${path}`;
+            if (env.$$type === 'number' && !Number.isFinite(Number(env.value))) {
+              out.push(F(this.id, this.severity, at, `number envelope holds '${env.value}' — the server 400s on this`, 'pass a real number (a string here usually means a spread/typo upstream)'));
+            } else if (env.$$type === 'size') {
+              const { unit, size } = env.value || {};
+              if (unit !== 'auto' && unit !== 'custom' && !Number.isFinite(Number(size))) out.push(F(this.id, this.severity, at, `size envelope holds size '${size}'`, 'sizes need a numeric size (calc()/clamp() belong in raw CSS)'));
+              if (unit != null && !SIZE_UNITS.has(unit)) out.push(F(this.id, this.severity, at, `size envelope has unknown unit '${unit}'`, `use one of ${['px', '%', 'em', 'rem', 'vw', 'vh', 'ch'].join('/')}`));
+            } else if (env.$$type === 'color' && typeof env.value === 'string') {
+              if (env.value.includes('gradient(')) out.push(F(this.id, this.severity, at, 'a CSS gradient string inside a color envelope renders nothing', 'use grad:[angle,from,to] or raw="background-image:…" for gradients'));
+              else if (!COLORISH.test(env.value.trim())) out.push(F(this.id, this.severity, at, `color envelope holds '${env.value.slice(0, 40)}' which isn't a color`, 'use #hex/rgb()/hsl()/var()/named colors'));
+            }
+          }
+        }
+      }
+      return out;
+    },
+  },
   {
     id: 'duplicate-page-slug', severity: 'error',
     run(bundle) {
@@ -126,26 +165,46 @@ const RULES = [
   },
   {
     // Incident: fresh-agent + Apple build — a font-family used in styles but never loaded falls
-    // back silently and every size/wrap measurement is wrong.
+    // back silently and every size/wrap measurement is wrong. UPDATE (2026-08-09, measured on a
+    // live V4 stack with obscure catalog fonts + a fake-family negative control): Elementor
+    // NATIVELY enqueues Google Fonts for every family that appears in atomic style props — the
+    // frontend emits `elementor-gf-<family>-css` <link>s and the woff2s load, no carrier needed.
+    // What Elementor does NOT scan is raw= custom CSS and html-widget markup: a family referenced
+    // ONLY there still silently falls back. That residue is what this rule now guards.
     id: 'font-not-loaded', severity: 'warn',
     run(bundle) {
       const loaded = new Set((bundle.fonts || []).map((f) => f.toLowerCase()));
+      const htmlBlobs = [];
       for (const page of pagesAndParts(bundle)) {
         for (const { n } of walk(page.elements)) {
-          const html = n.widgetType === 'html' ? String(n.settings?.html || '') : '';
-          for (const m of html.matchAll(/fonts\.googleapis\.com\/css2\?family=([^:&"']+)/g)) loaded.add(decodeURIComponent(m[1]).replace(/\+/g, ' ').toLowerCase());
+          if (n.widgetType !== 'html') continue;
+          const html = String(n.settings?.html || '');
+          htmlBlobs.push({ owner: `${page.slug ?? page.type}#${n.id}`, html });
+          for (const m of html.matchAll(/fonts\.googleapis\.com\/css2?\?family=([^:&"']+)/g)) loaded.add(decodeURIComponent(m[1]).replace(/\+/g, ' ').toLowerCase());
         }
       }
-      const used = new Map();
-      for (const { owner, props } of allStyleProps(bundle)) {
+      // families set via style props ride Elementor's native google-fonts enqueue — count as loaded
+      for (const { props } of allStyleProps(bundle)) {
         const ff = props['font-family'];
-        if (!ff || ff.$$type !== 'string') continue;   // variable refs resolve via the theme — fine
-        const fam = String(ff.value);
-        if (GENERIC_FONT.test(fam)) continue;          // system stacks need no loading
-        const first = fam.split(',')[0].trim().replace(/^["']|["']$/g, '');
-        if (!loaded.has(first.toLowerCase()) && !used.has(first)) used.set(first, owner);
+        if (!ff || (ff.$$type !== 'string' && ff.$$type !== 'font-family')) continue;   // variable refs resolve via the theme — fine
+        loaded.add(String(ff.value).split(',')[0].trim().replace(/^["']|["']$/g, '').toLowerCase());
       }
-      return [...used].map(([fam, owner]) => F(this.id, this.severity, owner, `font-family "${fam}" is used but never loaded (no fontLoader, not in bundle.fonts, not a system stack)`, `add fontLoader('${fam}', [weights]) first in the tree, or use a theme font`));
+      // remaining risk: a family referenced ONLY in raw CSS / html-widget markup with no loader
+      const used = new Map();
+      const consider = (fam, owner) => {
+        fam = String(fam).trim();
+        if (!fam || GENERIC_FONT.test(fam)) return;    // system stacks need no loading
+        const first = fam.split(',')[0].trim().replace(/^["']|["']$/g, '');
+        if (!first || /^(inherit|initial|unset|revert|var\()/i.test(first)) return;
+        if (!loaded.has(first.toLowerCase()) && !used.has(first)) used.set(first, owner);
+      };
+      for (const { owner, css } of allCustomCss(bundle)) {
+        for (const m of css.matchAll(/font-family\s*:\s*([^;}]+)/gi)) consider(m[1], owner);
+      }
+      for (const { owner, html } of htmlBlobs) {
+        for (const m of html.matchAll(/font-family\s*:\s*([^;}"']+)/gi)) consider(m[1], owner);
+      }
+      return [...used].map(([fam, owner]) => F(this.id, this.severity, owner, `font-family "${fam}" appears only in raw/html content — Elementor's native Google Fonts enqueue never sees it, so it silently falls back`, `set the family on any element via a style prop (font='${fam}') so Elementor enqueues it, or add fontLoader('${fam}', [weights])`));
     },
   },
   {

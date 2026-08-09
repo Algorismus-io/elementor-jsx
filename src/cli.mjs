@@ -66,6 +66,7 @@ async function build(entry) {
     const dry = process.argv.includes('--dry');
     const force = process.argv.includes('--force');
     const fast = process.argv.includes('--fast');
+    const ownClasses = process.argv.includes('--own-classes');
     // --only=a,b OR --only a,b (value = next token, must exist and not be a flag)
     let only;
     const onlyEq = process.argv.find((a) => a.startsWith('--only='));
@@ -79,7 +80,7 @@ async function build(entry) {
       }
     }
     const bundle = JSON.parse(readFileSync(resolve(arg), 'utf8'));
-    const r = await deployBundle(bundle, { dry, force, only , fast});
+    const r = await deployBundle(bundle, { dry, force, only, fast, ownClasses });
     // --only warnings (class-registry lag) surface in BOTH dry and real mode, on stderr
     for (const w of r.warnings || []) console.error(`WARN: ${w}`);
     if (dry) {
@@ -96,6 +97,7 @@ async function build(entry) {
     } else {
       if (r.kitSkipped) console.log(`deployed (--only): kit skipped, ${r.pages.length} page(s)`);
       else console.log(`deployed: ${r.variables} variables + ${r.classes} classes (2 kit writes), ${r.pages.length} page(s)`);
+      if (r.classesMerged) console.error(`WARN: ${r.classesMerged}`);
       r.pages.forEach((p) => console.log(`  ${p.action} "${p.title}" → id ${p.id} (/${p.slug}/)`));
       const drifted = r.pages.filter((p) => p.action === 'skipped-drifted');
       if (drifted.length) console.error(`⚠ ${drifted.length} page(s) SKIPPED (drifted — hand-edited outside exjsx): ${drifted.map((p) => `/${p.slug}/`).join(', ')}. Re-run with --force to overwrite.`);
@@ -218,8 +220,7 @@ export const meta = {
 export default ({ theme: t }) => (
   <box tw="flex flex-col w-full items-center" pad={0} bg={t.color.paper}>
     <section tw="flex flex-col items-center gap-6 w-full max-w-[960px] px-6 py-28 text-center">
-      {fontLoader('Fraunces', [600])}
-      {fontLoader('Inter', [400, 600])}
+      {/* Google fonts named via font= props load natively (Elementor enqueues them) — no fontLoader() needed */}
       <heading tag="h1" w="100%" size={64} weight={600} font={t.font.head} color={t.color.ink} mobile={{ size: 40 }}>
         Hello, Elementor.
       </heading>

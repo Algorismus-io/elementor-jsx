@@ -40,9 +40,11 @@ export const C = (v) => ({ $$type: 'color', value: v });
 export const N = (v) => ({ $$type: 'number', value: v });
 export const B = (v) => ({ $$type: 'boolean', value: v });
 export const SZ = (x, u = 'px') => ({ $$type: 'size', value: { unit: u, size: x } });
+/** number → px size; a prebuilt size envelope (unit-suffixed sx token) passes through. */
+const szv = (v) => (v?.$$type ? v : SZ(v));
 export const DIM = (t, r = t, b = t, l = r) => ({
   $$type: 'dimensions',
-  value: { 'block-start': SZ(t), 'inline-end': SZ(r), 'block-end': SZ(b), 'inline-start': SZ(l) },
+  value: { 'block-start': szv(t), 'inline-end': szv(r), 'block-end': szv(b), 'inline-start': szv(l) },
 });
 export const P0 = DIM(0);
 /** One dimensions side: number → px size, 'auto'/AUTO → auto, an envelope passes through. */
@@ -72,7 +74,7 @@ export const PDIM = ({ t, r, b, l }) => ({
 });
 export const RAD = (r) => ({
   $$type: 'border-radius',
-  value: { 'start-start': SZ(r), 'start-end': SZ(r), 'end-end': SZ(r), 'end-start': SZ(r) },
+  value: { 'start-start': szv(r), 'start-end': szv(r), 'end-end': szv(r), 'end-start': szv(r) },
 });
 /** Top-corners-only radius (cards over flush footers, tab headers). */
 export const RADT = (r) => ({
@@ -85,7 +87,15 @@ export const RADB = (r) => ({
   value: { 'start-start': SZ(0), 'start-end': SZ(0), 'end-end': SZ(r), 'end-start': SZ(r) },
 });
 export const BG = (c) => ({ $$type: 'background', value: { color: C(c) } });
-export const GRAD = (angle, c1, c2) => ({
+export const GRAD = (angle, c1, c2) => {
+  // Defense against the string-spread trap: GRAD(...'linear-gradient(…)') calls this with
+  // angle:'l', c1:'i', c2:'n' — the characters of the string. Shipped as a real 400 once.
+  const a = Number(angle);
+  if (!Number.isFinite(a)) throw new Error(`GRAD: angle '${angle}' is not a number (degrees) — for CSS gradient strings use raw="background-image:…;"`);
+  if ([c1, c2].some((c) => typeof c === 'string' && c.length < 3)) throw new Error(`GRAD: '${c1}'/'${c2}' don't look like colors — expected [angle, from, to]`);
+  return GRAD_(a, c1, c2);
+};
+const GRAD_ = (angle, c1, c2) => ({
   $$type: 'background',
   value: {
     'background-overlay': {

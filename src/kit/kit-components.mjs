@@ -45,24 +45,35 @@ import { mergeTw } from '../tw.mjs';
  * A compact style object maps to the verbose atomic prop envelopes. Numbers are px unless the
  * value says otherwise ('50%' → percent width). Recurses into `mobile`/`tablet`. Anything the
  * map doesn't cover goes through `raw` (a CSS string) via `box`/`styled`. */
+/* Elementor's atomic size schema accepts all of these (Size_Constants::standard_units) — anything
+ * else in a size string is either a typo or a CSS expression that belongs in `raw`. The old
+ * parseFloat coercion silently turned '88vw' into 88px and shipped a site of 88px-wide cards;
+ * unknown units must either be HONORED or THROW, never px-ified. */
+const LEN_RE = /^\s*(-?(?:\d+\.?\d*|\.\d+))(px|%|em|rem|vw|vh|ch|vmin|vmax)?\s*$/;
+const len = (v, prop) => {
+  if (typeof v !== 'string') return SZ(v);
+  const m = LEN_RE.exec(v);
+  if (!m) throw new Error(`sx ${prop}: unsupported value '${v}' — use a number (px) or 'N<unit>' with px/%/em/rem/vw/vh/ch/vmin/vmax; calc()/clamp()/keywords go through raw=`);
+  return SZ(parseFloat(m[1]), m[2] || 'px');
+};
 const width = (v) => {
   if (v === 'hug') return HUG;
   if (v === 'auto') return AUTO;
   if (typeof v === 'string') {
-    const n = parseFloat(v);
-    if (Number.isNaN(n)) {
+    if (!LEN_RE.test(v)) {
       // 'fit-content'/'max-content'/etc. would silently compile to a NaN envelope (field report:
       // agents reach for CSS keywords here) — name the right token instead.
-      throw new Error(`sx width/height: unknown value '${v}' — use 'hug' (= fit-content), 'auto', a number (px), or 'N%'`);
+      throw new Error(`sx width/height: unknown value '${v}' — use 'hug' (= fit-content), 'auto', a number (px), or 'N<unit>' (%/vw/vh/em/rem/ch)`);
     }
-    return SZ(n, v.trim().endsWith('%') ? '%' : 'px');
+    return len(v, 'width/height');
   }
   return SZ(v);
 };
 /** flex composite (Elementor Flex_Prop_Type: flexGrow/flexShrink/flexBasis). FLEX(1) → `flex:1 1 0`. */
 export const FLEX = (grow = 1, shrink = 1, basis = 0) => ({
   $$type: 'flex',
-  value: { flexGrow: N(grow), flexShrink: N(shrink), flexBasis: basis === 'auto' ? AUTO : SZ(basis) },
+  // string basis ('50%') used to land as SZ('50%') — a string where the schema wants a number.
+  value: { flexGrow: N(grow), flexShrink: N(shrink), flexBasis: basis === 'auto' ? AUTO : len(basis, 'flex basis') },
 });
 
 /** true for an already-built typed envelope (e.g. a `global-color-variable` reference from a theme). */
@@ -107,10 +118,15 @@ function unalias(o) {
   }
   return out || o;
 }
-/** 'Npx' → N for keys that take numbers (alias users write CSS-string values). */
-const num = (v) => (typeof v === 'string' ? parseFloat(v) : v);
-/** '96px 24px' → [96, 24] for pad/m ('auto' tokens preserved). */
-const boxVal = (v) => (typeof v === 'string' ? v.trim().split(/\s+/).map((s) => (s === 'auto' ? 'auto' : parseFloat(s))) : v);
+/** '96px 24px' → [96, 24] for pad/m ('auto' preserved; unit tokens become size envelopes). */
+const boxVal = (v, prop) => (typeof v === 'string'
+  ? v.trim().split(/\s+/).map((s) => {
+      if (s === 'auto') return 'auto';
+      const m = LEN_RE.exec(s);
+      if (!m) throw new Error(`sx ${prop}: unsupported token '${s}' in '${v}' — numbers (px), 'N<unit>' (px/%/em/rem/vw/vh/ch), or 'auto'; calc()/clamp() go through raw=`);
+      return m[2] ? SZ(parseFloat(m[1]), m[2]) : parseFloat(m[1]);
+    })
+  : v);
 
 export function sx(o = {}) {
   // sx={{…}} as a prop: a nested shorthand object, merged in (React/MUI users reach for `sx` — it
@@ -120,18 +136,32 @@ export function sx(o = {}) {
   const p = {};
   // bgImage: URL string / attachment id / prebuilt envelope → container background image
   if (o.bgImage != null) p.background = bgImage(o.bgImage, o.bgOpts);
-  else if (o.bg) p.background = Array.isArray(o.bg) ? GRAD(...o.bg) : bgValue(o.bg);
-  if (o.grad) p.background = GRAD(...o.grad);
-  if (o.zIndex != null || o.z != null) p['z-index'] = N(num(o.zIndex ?? o.z));
+  else if (o.bg) {
+    // a CSS gradient STRING is not a color — it used to ship inside a color envelope and render
+    // nothing. Spreading it into GRAD is worse: strings spread char-by-char (angle:'l', color 'i').
+    if (typeof o.bg === 'string' && o.bg.includes('gradient(')) {
+      throw new Error(`sx bg: CSS gradient strings aren't colors — use grad: [angle, from, to] or raw="background-image:${o.bg};"`);
+    }
+    p.background = Array.isArray(o.bg) ? GRAD(...o.bg) : bgValue(o.bg);
+  }
+  if (o.grad) {
+    if (!Array.isArray(o.grad)) throw new Error(`sx grad: expects [angle, from, to] — got ${typeof o.grad}; CSS gradient strings go through raw="background-image:…;"`);
+    p.background = GRAD(...o.grad);
+  }
+  if (o.zIndex != null || o.z != null) {
+    const zv = Number(o.zIndex ?? o.z);
+    if (!Number.isFinite(zv)) throw new Error(`sx z: '${o.zIndex ?? o.z}' is not a number — z-index takes an integer`);
+    p['z-index'] = N(zv);
+  }
   // object form {t,r,b,l} = PARTIAL sides — unset sides inherit (axis spacing in responsive variants)
-  if (o.pad != null) { const v = boxVal(o.pad); p.padding = Array.isArray(v) ? DIM(...v) : typeof v === 'object' ? PDIM(v) : DIM(v); }
-  if (o.m != null) { const v = boxVal(o.m); p.margin = Array.isArray(v) ? M(...v) : typeof v === 'object' ? PDIM(v) : M(v); }
+  if (o.pad != null) { const v = boxVal(o.pad, 'pad'); p.padding = Array.isArray(v) ? DIM(...v) : typeof v === 'object' ? PDIM(v) : DIM(v); }
+  if (o.m != null) { const v = boxVal(o.m, 'm'); p.margin = Array.isArray(v) ? M(...v) : typeof v === 'object' ? PDIM(v) : M(v); }
   if (o.center) p.margin = M(0, 'auto');
-  if (o.radius != null) p['border-radius'] = RAD(num(o.radius));
-  if (o.gap != null) p.gap = SZ(num(o.gap));
+  if (o.radius != null) p['border-radius'] = RAD(typeof o.radius === 'string' ? len(o.radius, 'radius') : o.radius);
+  if (o.gap != null) p.gap = len(o.gap, 'gap');
   if (o.w != null) p.width = width(o.w);
-  if (o.maxw != null) p['max-width'] = SZ(num(o.maxw));
-  if (o.minh != null) p['min-height'] = SZ(num(o.minh));
+  if (o.maxw != null) p['max-width'] = len(o.maxw, 'maxw');
+  if (o.minh != null) p['min-height'] = len(o.minh, 'minh');
   if (o.h != null) p.height = width(o.h);
   if (o.align) p['align-items'] = S(o.align);
   if (o.justify) p['justify-content'] = S(o.justify);
@@ -143,13 +173,27 @@ export function sx(o = {}) {
   }
   if (o.wrap) p['flex-wrap'] = S(o.wrap === true ? 'wrap' : o.wrap);
   if (o.color) p.color = colorVal(o.color);
-  if (o.size != null) p['font-size'] = SZ(num(o.size));
+  if (o.size != null) p['font-size'] = len(o.size, 'size');
   if (o.weight != null) p['font-weight'] = S(String(o.weight));
   if (o.font) p['font-family'] = isEnv(o.font) ? o.font : S(o.font);
   if (o.ta) p['text-align'] = S({ left: 'start', right: 'end' }[o.ta] || o.ta);
-  if (o.lh != null) { const v = num(o.lh); p['line-height'] = SZ(v, typeof v === 'number' && v <= 4 ? 'em' : 'px'); }
-  if (o.ls != null) p['letter-spacing'] = SZ(num(o.ls), 'em');
-  if (o.span != null) p['grid-column'] = { $$type: 'span', value: o.span };
+  // lh: bare numbers keep the CSS-like heuristic (≤4 reads as a multiplier → em, else px);
+  // an explicit unit in a string is honored ('150%' used to become 150px — ×100 wrong).
+  if (o.lh != null) {
+    const explicit = typeof o.lh === 'string' && /[a-z%]/i.test(o.lh);
+    if (explicit) p['line-height'] = len(o.lh, 'lh');
+    else { const v = parseFloat(o.lh); p['line-height'] = SZ(v, v <= 4 ? 'em' : 'px'); }
+  }
+  // ls: bare numbers are em by convention; '2px' used to become 2em (~×32 wrong) — honor the unit.
+  if (o.ls != null) {
+    const explicit = typeof o.ls === 'string' && /[a-z%]/i.test(o.ls);
+    p['letter-spacing'] = explicit ? len(o.ls, 'ls') : SZ(parseFloat(o.ls), 'em');
+  }
+  if (o.span != null) {
+    const sp = Number(o.span);
+    if (!Number.isFinite(sp)) throw new Error(`sx span: '${o.span}' is not a number — grid-column span takes an integer`);
+    p['grid-column'] = { $$type: 'span', value: sp };
+  }
   if (o.flex != null) p.flex = FLEX(o.flex);
   if (o.display) p.display = S(o.display);
   if (o.gridCols != null) { p.display = S('grid'); p['grid-template-columns'] = S(typeof o.gridCols === 'number' ? `repeat(${o.gridCols}, 1fr)` : o.gridCols); }

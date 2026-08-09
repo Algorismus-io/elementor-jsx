@@ -63,14 +63,30 @@ test('lint: heading-structure — zero h1, multiple h1, and level jumps', () => 
   assert.match(of(lintBundle(jump), 'heading-structure')[0].message, /jump h1 → h4/);
 });
 
-test('lint: font-not-loaded fires once per family; fontLoader and system stacks are clean', () => {
-  const bad = build(page('a', h('box', {}, h('h1', { font: 'Poppins' }, 'x'), h('text', { font: 'Poppins' }, 'y'))));
-  const f = of(lintBundle(bad), 'font-not-loaded');
+test('lint: font-not-loaded — style-prop families are native-loaded (clean); raw/html-only families warn', () => {
+  // families in style props ride Elementor's native google-fonts enqueue (verified live 2026-08-09) — NO carrier demanded
+  const native = build(page('a', h('box', {}, h('h1', { font: 'Poppins' }, 'x'), h('text', { font: 'Poppins' }, 'y'))));
+  assert.equal(of(lintBundle(native), 'font-not-loaded').length, 0, 'font= props need no fontLoader');
+  resetIds();
+  // a family referenced ONLY in raw custom CSS never reaches Elementor's enqueue — warn, once per family
+  const rawOnly = build(page('a', h('box', { raw: 'font-family: Poppins; & em { font-family: Poppins; }' }, h('h1', {}, 'x'))));
+  const f = of(lintBundle(rawOnly), 'font-not-loaded');
   assert.equal(f.length, 1, 'deduped per family');
+  assert.match(f[0].message, /only in raw\/html content/);
   assert.match(f[0].fix, /fontLoader\('Poppins'/);
-  const loaded = build(page('a', h('box', {}, fontLoader('Poppins', [600]), h('h1', { font: 'Poppins' }, 'x'))));
-  assert.equal(of(lintBundle(loaded), 'font-not-loaded').length, 0);
-  const system = build(page('a', h('box', {}, h('h1', { font: '"SF Pro Display",-apple-system,sans-serif' }, 'x'))));
+  resetIds();
+  // same family also set via a style prop elsewhere → Elementor enqueues it → raw usage is covered
+  const covered = build(page('a', h('box', { raw: 'font-family: Poppins;' }, h('h1', { font: 'Poppins' }, 'x'))));
+  assert.equal(of(lintBundle(covered), 'font-not-loaded').length, 0);
+  resetIds();
+  // html-widget-only family: warns without a loader, clean with the fontLoader carrier
+  const htmlOnly = build(page('a', h('box', {}, h('html', { raw: '<div style="font-family: Baskervville">x</div>' }), h('h1', {}, 'x'))));
+  assert.equal(of(lintBundle(htmlOnly), 'font-not-loaded').length, 1);
+  resetIds();
+  const htmlLoaded = build(page('a', h('box', {}, fontLoader('Baskervville', [400]), h('html', { raw: '<div style="font-family: Baskervville">x</div>' }), h('h1', {}, 'x'))));
+  assert.equal(of(lintBundle(htmlLoaded), 'font-not-loaded').length, 0);
+  resetIds();
+  const system = build(page('a', h('box', { raw: 'font-family: "SF Pro Display",-apple-system,sans-serif;' }, h('h1', {}, 'x'))));
   assert.equal(of(lintBundle(system), 'font-not-loaded').length, 0);
 });
 
