@@ -69,6 +69,16 @@ const GENERIC_FONT = /-apple-system|system-ui|BlinkMacSystemFont|sans-serif|seri
  * shipped a gradient string inside a color envelope and rendered nothing. Post-compile lint is
  * the last line for hand-built/decompiled bundles too. */
 const SIZE_UNITS = new Set(['px', '%', 'em', 'rem', 'vw', 'vh', 'ch', 'vmin', 'vmax', 'deg', 'rad', 's', 'ms', 'auto', 'custom']);
+/* Alignment enums from Elementor's style-schema.php — lint them here for hand-built/decompiled
+ * bundles (the compiler already throws; a bundle from elsewhere deserves the same catch).
+ * Incident: justify="between"/align="start" passed a 0-error lint, then the deploy 400d. */
+const FLEX_ENUMS = {
+  'justify-content': new Set(['center', 'start', 'end', 'flex-start', 'flex-end', 'left', 'right', 'normal', 'space-between', 'space-around', 'space-evenly', 'stretch']),
+  'align-items': new Set(['normal', 'stretch', 'center', 'start', 'end', 'flex-start', 'flex-end', 'self-start', 'self-end', 'anchor-center']),
+  'align-content': new Set(['center', 'start', 'end', 'space-between', 'space-around', 'space-evenly']),
+  'flex-wrap': new Set(['wrap', 'nowrap', 'wrap-reverse']),
+  'flex-direction': new Set(['row', 'column', 'row-reverse', 'column-reverse']),
+};
 const COLORISH = /^(#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\(|oklch\(|color-mix\(|var\(|currentcolor$|transparent$|[a-zA-Z]{3,25}$)/;
 function* walkEnvelopes(v, path = '') {
   if (!v || typeof v !== 'object') return;
@@ -93,6 +103,8 @@ const RULES = [
               const { unit, size } = env.value || {};
               if (unit !== 'auto' && unit !== 'custom' && !Number.isFinite(Number(size))) out.push(F(this.id, this.severity, at, `size envelope holds size '${size}'`, 'sizes need a numeric size (calc()/clamp() belong in raw CSS)'));
               if (unit != null && !SIZE_UNITS.has(unit)) out.push(F(this.id, this.severity, at, `size envelope has unknown unit '${unit}'`, `use one of ${['px', '%', 'em', 'rem', 'vw', 'vh', 'ch'].join('/')}`));
+            } else if (env.$$type === 'string' && FLEX_ENUMS[prop] && !FLEX_ENUMS[prop].has(env.value)) {
+              out.push(F(this.id, this.severity, at, `'${env.value}' isn't in Elementor's ${prop} enum — the server 400s on this`, `use one of: ${[...FLEX_ENUMS[prop]].join(' | ')}`));
             } else if (env.$$type === 'color' && typeof env.value === 'string') {
               if (env.value.includes('gradient(')) out.push(F(this.id, this.severity, at, 'a CSS gradient string inside a color envelope renders nothing', 'use grad:[angle,from,to] or raw="background-image:…" for gradients'));
               else if (!COLORISH.test(env.value.trim())) out.push(F(this.id, this.severity, at, `color envelope holds '${env.value.slice(0, 40)}' which isn't a color`, 'use #hex/rgb()/hsl()/var()/named colors'));
@@ -324,15 +336,36 @@ export function lintBundle(bundle) {
   const findings = RULES.flatMap((r) => r.run(bundle));
   const counts = { error: 0, warn: 0, info: 0 };
   for (const f of findings) counts[f.severity]++;
-  return { findings, counts };
+  // positive-assertion summary for the clean rules (what silence actually proved)
+  const dirty = new Set(findings.map((f) => f.rule));
+  const verified = [];
+  if (!dirty.has('invalid-envelope')) {
+    let envs = 0;
+    for (const { props } of allStyleProps(bundle)) for (const root of Object.values(props)) for (const _ of walkEnvelopes(root)) envs++;
+    verified.push(`${envs} style envelopes valid (numbers/colors/units/flex-enums)`);
+  }
+  if (!dirty.has('font-not-loaded')) {
+    const fams = new Set();
+    for (const { props } of allStyleProps(bundle)) {
+      const ff = props['font-family'];
+      if (ff && (ff.$$type === 'string' || ff.$$type === 'font-family')) fams.add(String(ff.value).split(',')[0].trim().replace(/^["']|["']$/g, ''));
+    }
+    if (fams.size) verified.push(`${fams.size} font famil${fams.size === 1 ? 'y' : 'ies'} covered (native enqueue or loader): ${[...fams].slice(0, 6).join(', ')}`);
+  }
+  if (!dirty.has('duplicate-page-slug')) verified.push(`${(bundle.pages || []).length} page slug(s) unique`);
+  return { findings, counts, verified };
 }
 
 /** CLI formatter: grouped by severity, stable order, one line per finding. */
-export function formatLint({ findings, counts }) {
+export function formatLint({ findings, counts, verified }) {
   const order = { error: 0, warn: 1, info: 2 };
   const lines = findings
     .sort((a, b) => order[a.severity] - order[b.severity] || a.rule.localeCompare(b.rule))
     .map((f) => `${f.severity.toUpperCase().padEnd(5)} ${f.rule} [${f.where}]: ${f.message}\n      fix: ${f.fix}`);
   const head = `lint: ${counts.error} error(s), ${counts.warn} warning(s), ${counts.info} info`;
-  return [head, ...lines].join('\n');
+  // Positive assertions: say what a clean rule actually PROVED, so agents don't re-verify it by
+  // hand (field pattern: font lint was silent and the agent still built a paint-probe to check
+  // fonts — silence isn't trusted; a stated verification is).
+  const tail = verified?.length ? [`verified: ${verified.join(' · ')}`] : [];
+  return [head, ...lines, ...tail].join('\n');
 }

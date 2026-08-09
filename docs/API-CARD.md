@@ -40,9 +40,13 @@ Sizes (`w h maxw minh gap size radius pad m`): number = px, or a unit string `'N
 px/%/em/rem/vw/vh/ch — units are honored (`maxw="88vw"` really is 88vw). `w h` also take `'hug'`/`'auto'`.
 Anything else (`calc()`, `clamp()`, keywords, two-value gap) THROWS — put it in `raw=`.
 `pad m` also take `[v,h]` | `[t,r,b,l]` | `{t,r,b,l}` partial | `'0 auto'` strings ·
-`dir` (`'row'|'column'` — `'col'` throws) · `align justify wrap center` · `display` · `flex` · `pos` ·
+`dir` (`'row'|'column'` — `'col'` throws) · `align justify` (Elementor enums, validated at build:
+justify = center|start|end|flex-start|flex-end|space-between/around/evenly|stretch, shorthands
+`'between'/'around'/'evenly'` auto-map; align = same minus the space-* plus self-start/self-end —
+**NO baseline**, use flex-end) · `wrap center` · `display` · `flex` · `pos` ·
 `span` · `gridCols` (e.g. `'repeat(3, 360px)'` — add `raw="justify-content:center;"` or grids left-pin) ·
-`color bg` (hex — NOT gradient strings) · `bgImage` (url|id) `bgOpts` · `grad` (**array `[angle, from, to]`**,
+`color bg` (hex — NOT gradient strings) · `bgImage` (url|id) `bgOpts`
+(`{color, size:'cover', position:'center center', repeat:'no-repeat', attachment}`) · `grad` (**array `[angle, from, to]`**,
 e.g. `grad={[135,'#0ff','#f0f']}` — a CSS gradient STRING throws; freeform gradients go in `raw="background-image:…;"`) ·
 `border` (`[w,'#color']` — bare number = width!) · `borderColor radius shadow` ·
 `size weight font lh ls ta` (bare-number `lh`≤4 and `ls` read as EM — `ls={-1}` collapses a headline;
@@ -73,10 +77,12 @@ explicit units are honored: `lh="150%"`, `ls="2px"`) ·
     formSubmit('Send message'),          // ← form() does NOT add a submit button by itself
   ])
   ```
-  Input types: text|email|number|tel|password, or `textarea:true`. **Use `collect-submissions`,
-  NOT `email`, on Elementor 4.2.x + Pro 4.1.0** (email action upstream-broken: validator and
-  send-runner disagree). Submissions land in `wp_e_submissions`. Add `formSuccess()` anywhere on
-  the page for a visible "sent" state — the atomic runner shows none.
+  Input types: text|email|number|tel|password, or `textarea:true`. **There is NO radio widget in
+  atomic Pro forms** — option-picker UIs are styled CHECKBOX fields (one per option, distinct ids)
+  or a select. **Use `collect-submissions`, NOT `email`, on Elementor 4.2.x + Pro 4.1.0** (email
+  action upstream-broken: validator and send-runner disagree). Submissions land in
+  `wp_e_submissions`. Add `formSuccess()` anywhere on the page for a visible "sent" state — the
+  atomic runner shows none.
 - `formSuccess({ message, sub, accent })` — canned success banner: hides the form, shows the banner
   when the Pro ajax submit succeeds. One per page with a form.
 
@@ -86,6 +92,13 @@ explicit units are honored: `lh="150%"`, `ls="2px"`) ·
   `Nav` gets silently shadowed. Name yours `SiteNav`/`SiteFooter` and import them explicitly.
 
 - Row children get `flex:1` unless width-pinned — use `w:'hug'` for justify-between clusters.
+- Absolute overlays inside FLEX parents: `pos:'absolute'` + `raw="inset:0;"` renders **0×0**
+  (no width/height of its own) — give the overlay explicit `w="100%" h="100%"` (and the parent
+  `pos:'relative'`).
+- Media manifest (`data/media.manifest.mjs`, run `exjsx media <dir>`): default-export an array of
+  `{ slot, file:'/abs/or/rel.jpg' }` or `{ slot, src:'https://…' }` (fonts:
+  `{ slot, type:'font', file, family, role, weight }` → embedded data-URI). Idempotent by slot;
+  writes `data/media.map.json` — read ids/urls from it, never hardcode.
 - A hidden-on-desktop mobile burger must hide its WIDGET, not just its button: a bare `<html>`
   widget as the 3rd child of a `justify="space-between"` header still occupies the right flex slot
   even when its inner button is `display:none` — the links rail gets CENTERED, not right-pinned

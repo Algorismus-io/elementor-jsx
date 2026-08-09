@@ -50,6 +50,11 @@ import { mergeTw } from '../tw.mjs';
  * parseFloat coercion silently turned '88vw' into 88px and shipped a site of 88px-wide cards;
  * unknown units must either be HONORED or THROW, never px-ified. */
 const LEN_RE = /^\s*(-?(?:\d+\.?\d*|\.\d+))(px|%|em|rem|vw|vh|ch|vmin|vmax)?\s*$/;
+/* Elementor's alignment enums, verbatim from style-schema.php — values outside these 400 at the
+ * server after a clean lint. Note align-items has NO 'baseline'. */
+const JUSTIFY_CONTENT = new Set(['center', 'start', 'end', 'flex-start', 'flex-end', 'left', 'right', 'normal', 'space-between', 'space-around', 'space-evenly', 'stretch']);
+const ALIGN_ITEMS = new Set(['normal', 'stretch', 'center', 'start', 'end', 'flex-start', 'flex-end', 'self-start', 'self-end', 'anchor-center']);
+const FLEX_SHORTHAND = { between: 'space-between', around: 'space-around', evenly: 'space-evenly' };
 const len = (v, prop) => {
   if (typeof v !== 'string') return SZ(v);
   const m = LEN_RE.exec(v);
@@ -163,8 +168,19 @@ export function sx(o = {}) {
   if (o.maxw != null) p['max-width'] = len(o.maxw, 'maxw');
   if (o.minh != null) p['min-height'] = len(o.minh, 'minh');
   if (o.h != null) p.height = width(o.h);
-  if (o.align) p['align-items'] = S(o.align);
-  if (o.justify) p['justify-content'] = S(o.justify);
+  // Elementor's schema enums these server-side (style-schema.php) — an off-vocabulary value passes
+  // lint and 400s the deploy (field hits: justify="between", align="baseline" ×5 across the batch).
+  // Tailwind-style shorthands are normalized; everything else must be in the enum or we throw NOW.
+  if (o.align) {
+    const v = FLEX_SHORTHAND[o.align] || o.align;
+    if (!ALIGN_ITEMS.has(v)) throw new Error(`sx align: '${o.align}' isn't in Elementor's align-items enum (${[...ALIGN_ITEMS].join(' | ')})${o.align === 'baseline' ? " — baseline isn't supported; use flex-end" : ''}`);
+    p['align-items'] = S(v);
+  }
+  if (o.justify) {
+    const v = FLEX_SHORTHAND[o.justify] || o.justify;
+    if (!JUSTIFY_CONTENT.has(v)) throw new Error(`sx justify: '${o.justify}' isn't in Elementor's justify-content enum (${[...JUSTIFY_CONTENT].join(' | ')})`);
+    p['justify-content'] = S(v);
+  }
   if (o.dir) {
     const DIRS = { row: 'row', column: 'column', 'row-reverse': 'row-reverse', 'column-reverse': 'column-reverse', col: null, vertical: null, horizontal: null };
     if (!(o.dir in DIRS)) throw new Error(`sx dir: unknown value '${o.dir}' — use 'row' | 'column' | 'row-reverse' | 'column-reverse'`);

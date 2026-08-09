@@ -70,3 +70,12 @@ test('bg rejects gradient strings; z and span reject non-numbers', () => {
 test('FLEX string basis lands as a real size envelope', () => {
   assert.deepEqual(FLEX(1, 1, '50%').value.flexBasis.value, { unit: '%', size: 50 });
 });
+
+test('align/justify: shorthands normalize, off-enum values throw at build', () => {
+  assert.equal(sx({ justify: 'between' })['justify-content'].value, 'space-between');
+  assert.equal(sx({ justify: 'evenly' })['justify-content'].value, 'space-evenly');
+  assert.equal(sx({ justify: 'space-between' })['justify-content'].value, 'space-between');
+  assert.equal(sx({ align: 'start' })['align-items'].value, 'start');   // valid per schema
+  assert.throws(() => sx({ align: 'baseline' }), /flex-end/);           // 5 field strikes
+  assert.throws(() => sx({ justify: 'middle' }), /justify-content enum/);
+});
