@@ -14,13 +14,23 @@
  * the whole point of throwing at build time.
  */
 import { createServer } from 'node:http';
-import { watch, mkdtempSync, writeFileSync } from 'node:fs';
+import { watch, mkdtempSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { createRequire } from 'node:module';
 import esbuild from 'esbuild';
 import { compileSite } from './compile.mjs';
 import { deployBundle } from './deploy.mjs';
+
+/** eu-studio's check gate, if installed as a package or sibling checkout — powers --gates. */
+function findStudioBin() {
+  const req = createRequire(import.meta.url);
+  try { return join(dirname(req.resolve('@algorismus/elementor-ultra-studio/package.json')), 'bin', 'studio.mjs'); } catch {}
+  const sibling = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'elementor-ultra-studio', 'bin', 'studio.mjs');
+  return existsSync(sibling) ? sibling : null;
+}
 
 async function buildProject(projectDir) {
   const { discoverProject, synthesizeEntry } = await import('./project.mjs');
@@ -61,12 +71,15 @@ const SHELL = (wpUrl, pages, port) => `<!doctype html><html><head><meta charset=
   @keyframes pulse{to{opacity:.4}}
   .name{font-weight:600} .status{color:#86868b;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   select{background:#1c1c22;color:#e8e8ee;border:1px solid #ffffff22;border-radius:6px;padding:4px 8px;font:inherit}
+  .pill{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;flex:none}
+  .pill.run{background:#2a2410;color:#fbbf24} .pill.pass{background:#0f2a1a;color:#4ade80} .pill.fail{background:#2a1215;color:#f87171}
   iframe{flex:1;border:0;width:100%;background:#fff}
   .overlay{display:none;position:fixed;left:16px;right:16px;bottom:16px;background:#2a1215;border:1px solid #f8717155;border-radius:10px;padding:14px 18px;font-family:ui-monospace,monospace;font-size:12.5px;color:#fecaca;white-space:pre-wrap;max-height:40vh;overflow:auto}
   .overlay.on{display:block}
 </style></head><body>
 <div class="bar"><span class="dot" id="dot"></span><span class="name">exjsx dev</span>
 <select id="page">${pages.map((slug) => `<option value="/${slug === 'home' ? '' : slug + '/'}">${slug}</option>`).join('')}</select>
+<span class="pill" id="gate" style="display:none"></span>
 <span class="status" id="status">watching…</span></div>
 <iframe id="frame" src="${wpUrl}/"></iframe>
 <div class="overlay" id="overlay"></div>
@@ -79,10 +92,14 @@ es.onmessage=(e)=>{
   if(m.type==='building'){dot.className='dot busy';status.textContent='building…';}
   if(m.type==='reload'){dot.className='dot';overlay.className='overlay';status.textContent=m.note;try{frame.contentWindow.location.reload()}catch{frame.src=frame.src}}
   if(m.type==='error'){dot.className='dot err';status.textContent='build failed';overlay.textContent=m.message;overlay.className='overlay on';}
+  if(m.type==='gate'){const g=document.getElementById('gate');g.style.display='inline-block';
+    if(m.state==='running'){g.className='pill run';g.textContent='gates…'}
+    else if(m.state==='pass'){g.className='pill pass';g.textContent='gates ✓ '+m.detail}
+    else{g.className='pill fail';g.textContent='gates ✗ '+m.detail}}
 };
 </script></body></html>`;
 
-export async function dev(projectDir, { port = 4477 } = {}) {
+export async function dev(projectDir, { port = 4477, gates = false } = {}) {
   const dir = resolve(projectDir);
   const wpUrl = (process.env.WP_URL || '').replace(/\/$/, '');
   if (!wpUrl) throw new Error('exjsx dev: set WP_URL (and WP_USER/WP_APP_PASSWORD) — the preview shows the real deployed page');
@@ -116,12 +133,35 @@ export async function dev(projectDir, { port = 4477 } = {}) {
       prev = sig;
       send({ type: 'reload', note: `${note} · ${reason}` });
       console.log(`[dev] ${note}`);
+      // gates-as-you-type: AFTER the reload (never blocking it), run the check probes on what
+      // changed and pill the result. Opt-in — it costs ~15s of headless browser per save.
+      if (gates && studioBin && (kitChanged || changedSlugs.length)) runGates(kitChanged ? [...sig.pages.keys()] : changedSlugs);
     } catch (e) {
       send({ type: 'error', message: String(e.message || e) });
       console.error(`[dev] build failed: ${e.message}`);
     }
     busy = false;
     if (queued) { queued = false; cycle('queued change'); }
+  }
+
+  const studioBin = gates ? findStudioBin() : null;
+  if (gates && !studioBin) console.error('[dev] --gates: eu-studio not found (npm i -D @algorismus/elementor-ultra-studio) — gates disabled');
+  let gateSeq = 0;
+  function runGates(slugs) {
+    const seq = ++gateSeq;
+    const pages = slugs.map((s) => (s === 'home' ? '/' : `/${s}/`)).join(',');
+    send({ type: 'gate', state: 'running', pages });
+    execFile('node', [studioBin, 'check', '--pages', pages], { env: process.env, timeout: 180000 }, (err, stdout) => {
+      if (seq !== gateSeq) return; // a newer save superseded this run
+      try {
+        const rep = JSON.parse(stdout.trim().split('\n').pop());
+        const offenders = rep.structural.results.flatMap((r) => (r.offenders || []).map((o) => `${r.page}@${r.width} ${o.reason}`));
+        send({ type: 'gate', state: rep.pass ? 'pass' : 'fail', pages, detail: rep.pass ? `${rep.structural.results.length} cells` : offenders[0] || 'see terminal' });
+        console.log(`[dev] gates ${rep.pass ? 'PASS' : 'FAIL'} (${pages})${offenders.length ? ' — ' + offenders.join('; ') : ''}`);
+      } catch {
+        send({ type: 'gate', state: 'fail', pages, detail: err ? String(err.message).slice(0, 80) : 'gate output unparsable' });
+      }
+    });
   }
 
   // initial build + full deploy so the preview starts truthful

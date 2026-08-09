@@ -20,6 +20,9 @@ site/
 Build/deploy: `exjsx build <dir>` → `exjsx deploy <bundle.json>` (idempotent; self-primes CSS;
 detects Elementor version over REST — no wp-cli needed; a stray EXJSX_WPCLI pointing at another
 site is auto-ignored). `exjsx lint <dir>` before every deploy.
+Live loop: `exjsx dev <dir> [--gates]` — watch + rebuild (ms) + smart deploy (page-only ~3s;
+full only when classes/variables change) + preview at :4477 that reloads on save and shows build
+errors in an overlay; `--gates` re-runs the eu-studio check on changed pages after each save.
 
 ## Intrinsics (the ONLY tags)
 
