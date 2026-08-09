@@ -98,7 +98,7 @@ explicit units are honored: `lh="150%"`, `ls="2px"`) ·
 - Media manifest (`data/media.manifest.mjs`, run `exjsx media <dir>`): default-export an array of
   `{ slot, file:'/abs/or/rel.jpg' }` or `{ slot, src:'https://…' }` (fonts:
   `{ slot, type:'font', file, family, role, weight }` → embedded data-URI). Idempotent by slot;
-  writes `data/media.map.json` — read ids/urls from it, never hardcode.
+  writes `data/media-map.json` — read ids/urls from it, never hardcode.
 - A hidden-on-desktop mobile burger must hide its WIDGET, not just its button: a bare `<html>`
   widget as the 3rd child of a `justify="space-between"` header still occupies the right flex slot
   even when its inner button is `display:none` — the links rail gets CENTERED, not right-pinned
