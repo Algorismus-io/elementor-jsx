@@ -23,9 +23,17 @@ export function h(type, props, ...children) {
 }
 
 /* ── render context (theme + breakpoint) — a simple synchronous stack ── */
-let CTX = { theme: null, bp: 'desktop' };
-export const useTheme = () => CTX.theme;
-export const useCtx = () => CTX;
+/* CTX lives on globalThis under a registered symbol for the same reason Fragment does: the
+ * build BUNDLES a second copy of this module into the entry (pages call the bundled useTheme),
+ * while compileSite renders with the disk copy (which seeds its own CTX). Module-level state
+ * split across the two copies made useTheme() null inside every fs-project page — found the
+ * day useTheme was first actually used from a project. */
+const CTX_KEY = Symbol.for('exjsx.CTX');
+if (!globalThis[CTX_KEY]) globalThis[CTX_KEY] = { theme: null, bp: 'desktop' };
+const getCTX = () => globalThis[CTX_KEY];
+const setCTX = (v) => { globalThis[CTX_KEY] = v; };
+export const useTheme = () => getCTX().theme;
+export const useCtx = () => getCTX();
 
 const isKitNode = (x) => x && typeof x === 'object' && typeof x.elType === 'string';
 /* Inline vnodes inside text intrinsics serialize to the html-v3 whitelisted tags (the <em> accent
@@ -54,11 +62,11 @@ export function render(vnode) {
   if (type === Fragment) return render(children);
 
   if (typeof type === 'function') {                 // Component
-    const prev = CTX;
-    if (props.theme) CTX = { ...CTX, theme: props.theme };
-    const out = type({ ...props, children }, CTX);
+    const prev = getCTX();
+    if (props.theme) setCTX({ ...prev, theme: props.theme });
+    const out = type({ ...props, children }, getCTX());
     const built = render(out);
-    CTX = prev;
+    setCTX(prev);
     return built;
   }
   return intrinsic(type, props, children);          // 'box' | 'heading' | ...

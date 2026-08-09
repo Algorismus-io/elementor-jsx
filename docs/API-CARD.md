@@ -13,6 +13,8 @@ site/
   pages/home.page.jsx    export const meta = { title, slug?, seo?, template? }
                          export default ({ theme }) => <section>…</section>
                          (token access: theme.spec.colors.* / theme.spec.fonts.*)
+                         Components DON'T need {t} prop-drilling: `useTheme()` (free var) returns
+                         the active theme anywhere in the tree — const t = useTheme().
 ```
 
 Build/deploy: `exjsx build <dir>` → `exjsx deploy <bundle.json>` (idempotent; self-primes CSS;
