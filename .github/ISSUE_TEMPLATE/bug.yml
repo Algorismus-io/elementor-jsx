@@ -1,0 +1,25 @@
+name: Bug report
+description: exjsx build/dev/deploy did something wrong
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: Smallest JSX that reproduces it
+      render: jsx
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Elementor version
+      placeholder: "4.2.0"
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: What happened vs what you expected
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Output of the failing command (exjsx build/dev/deploy, verbatim)
+      render: shell
