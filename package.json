@@ -2,7 +2,7 @@
   "name": "@algorismus/elementor-jsx",
   "version": "1.6.0",
   "type": "module",
-  "description": "The build layer that lets AI agents ship Elementor sites like software. Agents write small typed JSX components instead of 4,000-line _elementor_data blobs; the compiler emits native Elementor V4 JSON and deploys it over REST with authoritative server-side validation, drift protection and version adapters. Every run is a git diff you review, not JSON you audit. Certified on Elementor 4.1.4-4.2.1 by a 522-test suite.",
+  "description": "Build Elementor sites with AI agents \u2014 typed JSX in, native editable Elementor pages out over REST. Hot reload dev loop, verification gates, 400+ test certified. The exjsx CLI.",
   "bin": {
     "exjsx": "./src/cli.mjs"
   },
@@ -58,18 +58,21 @@
     "node": ">=18"
   },
   "keywords": [
-    "ai-agents",
-    "agent-native",
-    "mcp",
-    "llm",
     "elementor",
     "wordpress",
+    "ai",
+    "ai-agents",
     "jsx",
     "compiler",
-    "code-generation",
     "page-builder",
-    "site-builder",
-    "cli"
+    "website-builder",
+    "mcp",
+    "claude",
+    "cursor",
+    "site-generator",
+    "elementor-widgets",
+    "wordpress-automation",
+    "exjsx"
   ],
   "repository": {
     "type": "git",
@@ -78,7 +81,7 @@
   "bugs": {
     "url": "https://github.com/Algorismus-io/elementor-jsx/issues"
   },
-  "homepage": "https://github.com/Algorismus-io/elementor-jsx#readme",
+  "homepage": "https://exjsx.dev",
   "author": "Algorismus <shahmir@algorismus.io> (https://algorismus.io)",
   "publishConfig": {
     "access": "public"
