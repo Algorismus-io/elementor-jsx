@@ -11,6 +11,7 @@
 import { box, sx, styled, splitStates, applyStates, h2 as kh2, h3 as kh3, txt as ktxt } from './kit/kit-components.mjs';
 import { heading, para, image, imageUrl, node, nativeGrid, LINK, interact, ATTRS } from './kit/kit.mjs';
 import { mergeTw } from './tw.mjs';
+import { componentsActive, emitComponentInstance } from './component.mjs';
 
 /* Symbol.for, not Symbol: a relative-import entry gets its OWN bundled runtime copy (the cli's
  * packages:'external' only externalizes bare imports), so <>…</> made by that copy must still
@@ -62,6 +63,11 @@ export function render(vnode) {
   if (type === Fragment) return render(children);
 
   if (typeof type === 'function') {                 // Component
+    // REGISTRATION SEAM (spec 2.0): a defineComponent-marked function under an active collector
+    // (compileSite) renders ONCE into a registered component tree; each invocation emits a native
+    // e-component INSTANCE node instead of inline-expanding. Outside compileSite (bare render/
+    // renderPage callers, tests) the marked function falls through to inline expansion unchanged.
+    if (type.$$component && componentsActive()) return emitComponentInstance(type, props, children);
     const prev = getCTX();
     if (props.theme) setCTX({ ...prev, theme: props.theme });
     const out = type({ ...props, children }, getCTX());
@@ -182,6 +188,12 @@ function intrinsic(type, props, children) {
       );
   }
 }
+
+/* Publish render for component.mjs (the seam target renders definitions/sentinels/extractions
+ * through THIS render). A registered-symbol handoff, not an import: component.mjs importing
+ * runtime back would make the cycle bite at module init. Each bundled runtime copy overwrites the
+ * slot at its own init — all copies are behaviorally identical, so last-write-wins is safe. */
+globalThis[Symbol.for('exjsx.render')] = render;
 
 /** Render a full page vnode to a flat top-level elements array (kit trees). */
 export function renderPage(vnode) {

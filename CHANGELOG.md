@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+**Components 1:1 (SPEC 2.0 — phase 1)** — `defineComponent(fn, {title, props})`: JSX components
+compile to NATIVE registered Elementor components (`elementor_component` CPT) with per-instance
+overridable props; wire formats live-verified against Elementor 4.2.1 + Pro 4.1.0:
+- **Registration seam** (`runtime.mjs`): a marked function under `compileSite` renders ONCE into
+  a component tree (stable uid = djb2 of normalized tree + title); every invocation emits the
+  native `e-component` instance envelope (`component-instance`/`overrides`/`override` $$types,
+  `schema_source.id ≡ component_id` invariant, uid carried in `editor_settings`). Outside
+  `compileSite` (and for un-marked functions) inline expansion is byte-identical to 1.x.
+- **Sentinel-diff props→overrides mapping** (`component.mjs`): render with defaults (tree A),
+  re-render per prop with a U+2063-bracketed sentinel (tree B), id-normalized diff locates the
+  exact `(elementId, propKey)`; a diff not containing the sentinel = non-determinism error.
+  BUILD ERRORS mirror the platform constraints: style/classes-landing props (with the
+  variants-idiom recommendation — **styles cannot be overridden, period**), multi-target props
+  (v1), structure-changing props, prop forwarding into nested components (phase 2).
+- **Build-time 422 mirrors**: atomic-only trees (classic `html`/navBar/browserMock named),
+  cycle detection (uid-aware DFS via the render stack, depth ≤50), ≤100 components, unique
+  titles/uids, title 2..200.
+- **Bundle**: `components: [{uid, title, elements, settings:{overridable_props}, treeHash}]` —
+  registry shape (props + groups items with `props` arrays + order) validated against
+  `create-validate` on 4.2.1.
+- **Deploy** (`deploy.mjs`): new phase before pages — batch `POST /elementor/v1/components`
+  (status publish, topo-ordered for nested composition), uid→id map, instance rewrite. 403
+  insufficient_permissions (no ACTIVE Pro) or missing route → WARN + **inline-expansion
+  fallback** (locked: builds stay portable); 422 codes surface verbatim. Redeploy v1: uid match
+  reuses silently (uid doubles as the deployed-tree fingerprint); title-match-with-changed-uid
+  reuses + WARNS (no update route until the phase-2 ultra-mcp controller); `planComponents` is
+  pure/exported.
+
 **Interactions / motion (SPEC 1.8)** — native entrance/scroll animations, source-verified
 against Elementor 4.2.1 free + live-verified on a 4.2.1+Pro Playground stack:
 - **`motion={{…}}` prop** (or array ≤5; 6 throws) on every atomic intrinsic → `interact()` /

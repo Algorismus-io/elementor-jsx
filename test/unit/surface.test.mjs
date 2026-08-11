@@ -28,6 +28,9 @@ const EXCLUDES = {
   'kit/kit-components.mjs': ['CInc'],
   'theme.mjs': ['S', 'C', 'SZ', 'BG', 'RAD', 'DIM'],   // re-exports of kit names — barrel takes them from kit
   'site.mjs': [], 'tw.mjs': [], 'runtime.mjs': [],
+  // compile/deploy machinery — the authoring surface is defineComponent only
+  'component.mjs': ['beginComponents', 'componentsActive', 'finalizeComponents', 'endComponents',
+    'emitComponentInstance', 'rewriteComponentIds', 'hasComponentInstances', 'referencedComponentUids', 'expandInstances'],
 };
 
 test('surface: every source-module export is in the barrel or documented EXCLUDES (and none stale)', async () => {

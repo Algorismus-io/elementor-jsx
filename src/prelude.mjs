@@ -15,7 +15,7 @@
  * test/unit/surface.test.mjs enforces prelude ⊆ barrel∪components and the deny-list.
  */
 export {
-  h, Fragment, useTheme, useCtx, defineSite, fromData, defineTheme, sx, box, styled, bindClass,
+  h, Fragment, useTheme, useCtx, defineSite, fromData, defineTheme, defineComponent, sx, box, styled, bindClass,
   css, clone, interact, fontLoader, formSuccess, col, row, grid, nativeGrid, hugRow, hugCol, sect, hero, hamburgerNav,
   heading, para, button, image, imageUrl, textLink, divider, youtube, video, tabs, archConvex,
   archConcave, dyn, loopGrid, form, field, formInput, formTextarea, formSelect, formCheckbox,

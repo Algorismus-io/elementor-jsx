@@ -229,6 +229,31 @@ export interface SiteDef {
 }
 
 export function defineSite(def: SiteDef): { $$site: true } & SiteDef;
+
+/** Overridable-prop declaration for defineComponent. LOUD CONSTRAINT: a prop may only land on
+ * SETTINGS (text, labels, links…) — Elementor components CANNOT override styles or classes, so a
+ * style-feeding prop (tint/radius/sx-ish) is a BUILD error. Visual variants = N registered
+ * components (the blessed idiom), or skip defineComponent to keep inline expansion. */
+export interface ComponentPropMeta {
+  /** editor control label (defaults to the prop key). */
+  label?: string;
+  /** editor group label (props sharing a group render together; defaults to 'Props'). */
+  group?: string;
+  /** definition baseline (falls back to the fn's own JS param default). */
+  default?: unknown;
+}
+/**
+ * SPEC 2.0: mark a component for NATIVE Elementor registration. The definition renders ONCE into a
+ * registered component (elementor_component CPT, created at deploy over REST); every JSX invocation
+ * emits an e-component instance whose passed props ride as per-instance overrides — labeled,
+ * grouped editor controls; editing the component updates all instances. Instances take NO children
+ * and only declared props. On targets that cannot create components (no active Pro) the deploy
+ * warns and inline-expands, so builds stay portable. Un-marked functions keep inline expansion.
+ */
+export function defineComponent<P extends Record<string, unknown>>(
+  fn: (props: P, ctx?: unknown) => unknown,
+  meta: { title: string; props?: { [K in keyof P]?: ComponentPropMeta } },
+): (props: Partial<P>) => unknown;
 export function fromData<T>(items: T[], map: (item: T, i: number) => PageDef): PageDef[];
 export function defineTheme(spec: ThemeSpec): Theme;
 export function compileSite(site: { $$site: true }): Record<string, unknown>;

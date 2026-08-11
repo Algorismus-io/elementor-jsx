@@ -2,13 +2,15 @@
 import { renderPage } from './runtime.mjs';
 import { assertTree } from './kit/kit.mjs';
 import { extractClasses, mergeClasses } from './classes.mjs';
+import { beginComponents, finalizeComponents, endComponents } from './component.mjs';
 
 /**
  * Normalize every element id to be globally unique within a page, rekeying local styles (whose ids
  * embed the element id) and settings.classes local refs. A compiler must guarantee this regardless of
  * how many kit instances / eager helper calls contributed subtrees — sidesteps id-counter collisions.
+ * (exported: deploy.mjs re-normalizes pages after the inline-expansion component fallback.)
  */
-function normalizeIds(elements) {
+export function normalizeIds(elements) {
   let n = 0;
   const next = () => `e${(n++).toString(36).padStart(5, '0')}`;
   const walk = (node) => {
@@ -89,6 +91,18 @@ function normalizePopupDisplay(display) {
 
 export function compileSite(site) {
   if (!site?.$$site) throw new Error('compile: entry must default-export defineSite({...})');
+  // component collection (spec 2.0): active for the WHOLE compile so defineComponent invocations
+  // in any page/part emit instance nodes into ONE shared registry; finally-cleared so a failed
+  // compile can never leak the collector into later bare renderPage() calls.
+  try {
+    beginComponents();
+    return compileSiteInner(site);
+  } finally {
+    endComponents();
+  }
+}
+
+function compileSiteInner(site) {
   const { name, theme, pages, parts } = site;
   const respectReducedMotion = site.motion?.respectReducedMotion !== false;   // default ON
   const fonts = new Set();
@@ -134,6 +148,10 @@ export function compileSite(site) {
     });
   }
   const classes = mergeClasses(classMaps);
+  // registered components (spec 2.0): validated (≤100, unique titles/uids) + shaped for
+  // POST /elementor/v1/components — [{uid, title, elements, settings:{overridable_props}, treeHash}].
+  // uid-keyed; deploy maps uid→per-site id and rewrites the instance nodes.
+  const components = finalizeComponents();
   return {
     name,
     // no-theme fallback MUST still carry watermark+version — deploying bare {data:{}} writes an
@@ -145,7 +163,8 @@ export function compileSite(site) {
     fonts: [...fonts],
     pages: compiledPages,
     parts: compiledParts,                       // theme-builder templates (header/footer)
-    stats: { localStylesBefore: localStyleCount, sharedClasses: classes.order.length },
+    components,                                 // native Elementor components (spec 2.0)
+    stats: { localStylesBefore: localStyleCount, sharedClasses: classes.order.length, components: components.length },
     generatedBy: 'elementor-jsx',
   };
 }

@@ -8,13 +8,14 @@
  * Result: far smaller trees, real class reuse, an editable class-based design system.
  */
 
-/** canonical JSON (sorted keys) so structurally-identical variant sets hash equal. */
-function stable(v) {
+/** canonical JSON (sorted keys) so structurally-identical variant sets hash equal.
+ * (exported: component.mjs reuses the hasher pair for uid/tree fingerprints — spec 2.0) */
+export function stable(v) {
   if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
   if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
   return JSON.stringify(v);
 }
-const djb2 = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36); };
+export const djb2 = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36); };
 
 /**
  * Extract shared classes from a page's elements (mutates: strips local styles, adds class refs).
