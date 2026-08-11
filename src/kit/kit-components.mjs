@@ -11,7 +11,7 @@
  * Everything still emits plain kit nodes (valid atomic trees) — compose freely with raw kit helpers.
  */
 import {
-  node, css, freshId,
+  node, css, freshId, stateVariant,
   S, C, N, B, SZ, DIM, M, PDIM, P0, RAD, BG, GRAD, SHADOW, HUG, AUTO, HTML, LINK, CLS, IMG_ID, IMG_URL,
   fx, col, row, grid, sect, heading, para, button, image, textLink, iconChip, faIcon,
 } from './kit.mjs';
@@ -135,10 +135,52 @@ const boxVal = (v, prop) => (typeof v === 'string'
     })
   : v);
 
+/* ── state objects: hover={{…}}-style per-state styling wherever sx is (box/styled/JSX) ──
+ * Values use the SAME sx vocabulary plus `raw` (state-scoped custom CSS) and nested tablet/mobile
+ * (breakpoint-scoped states). e--selected/e--disabled stay kit-only (stateVariant) — they're
+ * editor-machinery class states, not authoring vocabulary. */
+const SX_STATES = { hover: 'hover', active: 'active', focus: 'focus', 'focus-visible': 'focus-visible', focusVisible: 'focus-visible', checked: 'checked' };
+/** Pull state objects out of an sx-input object → { rest, states } (state names normalized). */
+export function splitStates(o = {}) {
+  let rest = o;
+  const states = {};
+  for (const [k, st] of Object.entries(SX_STATES)) {
+    if (o[k] == null) continue;
+    if (rest === o) rest = { ...o };
+    states[st] = { ...(states[st] || {}), ...rest[k] };
+    delete rest[k];
+  }
+  return { rest, states };
+}
+/** Apply state objects to a node: sx-mappable keys → NATIVE state variants (desktop, plus
+ * tablet/mobile nests → breakpoint-scoped state variants); `raw` → per-state custom_css
+ * (nested tablet/mobile raw → per-breakpoint per-state custom_css). */
+export function applyStates(n, states) {
+  for (const [state, obj] of Object.entries(states || {})) {
+    const { raw, tablet, mobile, ...rest } = obj;
+    const desk = sx(rest);
+    if (Object.keys(desk).length) stateVariant(n, state, desk);
+    for (const [bpKey, bpObj] of [['tablet', tablet], ['mobile', mobile]]) {
+      if (!bpObj) continue;
+      const { raw: bpRaw, ...bpRest } = bpObj;
+      const p = sx(bpRest);
+      if (Object.keys(p).length) stateVariant(n, state, p, { breakpoint: bpKey });
+      if (bpRaw) css(n, bpRaw, { breakpoint: bpKey, state });
+    }
+    if (raw) css(n, raw, { state });
+  }
+  return n;
+}
+
 export function sx(o = {}) {
   // sx={{…}} as a prop: a nested shorthand object, merged in (React/MUI users reach for `sx` — it
   // used to be silently dropped). Its keys use the SAME shorthand vocabulary; outer keys win.
   if (o.sx && typeof o.sx === 'object') { const { sx: inner, ...rest } = o; o = { ...inner, ...rest }; }
+  // A state object here has no node to land on — it would be silently dropped. box()/styled()/the
+  // JSX runtime extract states (splitStates) BEFORE calling sx; anything else must too.
+  for (const k of Object.keys(o)) {
+    if (SX_STATES[k]) throw new Error(`sx: state object '${k}' has no target node here — state styling goes through box()/styled()/JSX props (${SX_STATES[k]}={{…}}), or kit stateVariant(node, '${SX_STATES[k]}', props). Note: states nest breakpoints (hover: { tablet: {…} }), not the other way around.`);
+  }
   o = unalias(o);
   const p = {};
   // bgImage: URL string / attachment id / prebuilt envelope → container background image
@@ -264,13 +306,15 @@ function ensureRowChild(ch) {
 /* box: the workhorse — one call replaces col({…verbose props}) + a trailing css(node,'…raw…').
  * `dir:'row'` for a row; `raw` for any CSS the sx map doesn't cover (gradients-on-text, grid spans…). */
 export function box(o = {}, ch = []) {
-  const { raw, dir, tag, ...rest } = mergeTw(o);
+  const { rest: o2, states } = splitStates(mergeTw(o));
+  const { raw, dir, tag, ...rest } = o2;
   if (dir === 'row') ch.forEach(ensureRowChild);
   // dir stays in the sx input: the tag branch (sect) doesn't route through row()/col(),
   // so flex-direction must come from the props or <section dir="row"> silently renders as a column.
   const props = sx(dir ? { ...rest, dir } : rest);
   const n = tag ? sect(tag, props, ch) : (dir === 'row' ? row(props, ch) : col(props, ch));
   if (raw) css(n, raw);
+  applyStates(n, states);
   return n;
 }
 /** Apply extra sx/raw to any existing node (post-hoc styling). Bootstraps a style holder on a
@@ -278,7 +322,8 @@ export function box(o = {}, ch = []) {
  * caught by the elementor-jsx test suite). Responsive keys (_t/_m from tablet/mobile) go to
  * their own variants, not into desktop props. */
 export function styled(n, o = {}) {
-  const { raw, ...rest } = mergeTw(o);
+  const { rest: o2, states } = splitStates(mergeTw(o));
+  const { raw, ...rest } = o2;
   const { _t, _m, ...deskP } = sx(rest);
   let sid = Object.keys(n.styles || {})[0];
   if (!sid && (Object.keys(deskP).length || _t || _m)) {
@@ -298,6 +343,7 @@ export function styled(n, o = {}) {
     }
   }
   if (raw) css(n, raw);
+  applyStates(n, states);
   return n;
 }
 /** Attach a registered global class (Class-Manager) by id, preserving locals. `bindClass(n,'fm-card')`. */

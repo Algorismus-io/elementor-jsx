@@ -68,7 +68,7 @@ test('every sx() shorthand key appears in the sx matrix test (parity language fu
 
 test('every runtime intrinsic special prop is exercised (tag/dir/raw/href/id/alt/cls/gcls)', () => {
   const rt = readFileSync(join(root, 'src', 'runtime.mjs'), 'utf8');
-  const destructure = rt.match(/const \{ ([^}]+) \} = (?:mergeTw\()?props\)?;/);
+  const destructure = rt.match(/const \{ ([^}]+) \} = (?:p2|(?:mergeTw\()?props\)?);/);
   assert.ok(destructure, 'intrinsic prop destructure found');
   const props = destructure[1].split(',').map((s) => s.trim().split(':')[0].trim()).filter((s) => s && !s.startsWith('...'));
   const missing = props.filter((p) => !new RegExp(`[{,\\s'"]${p}\\s*[:}]`).test(corpus));

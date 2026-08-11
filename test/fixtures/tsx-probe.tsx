@@ -29,6 +29,9 @@ const Page = ({ title, children }: { title: string; children?: unknown }) => (
         </div>
       </col>
       <html raw={'<div id="tsx-probe" style="height:4px"></div>'} />
+      <box pad={0} attrs={{ 'data-probe': 'tsx', 'aria-label': 'probe' }} hover={{ bg: '#0f172a', raw: 'outline: none;' }} focus-visible={{ bg: '#ffffff' }} active={{ color: '#B31E2C', tablet: { color: '#5B6B72' } }}>
+        <text checked={{ weight: 700 }}>state-typed cell</text>
+      </box>
       {children}
     </box>
   </section>

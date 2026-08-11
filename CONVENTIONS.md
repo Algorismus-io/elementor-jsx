@@ -63,6 +63,17 @@ mysite/
 Incident record: free-Elementor pages silently dropped raw backgrounds until `--inline` existed;
 raw blocks are also invisible to the class dedup.
 
+State styling follows the same ladder: state props / tw state prefixes first (they emit NATIVE
+state variants when fully schema-mappable — editor-visible, schema-validated), `raw`/state-`raw`
+only for CSS the schema can't hold. A tw state bucket with ANY raw-only utility compiles entirely
+to a raw `&:state {…}` block (deterministic split — never half-and-half).
+
+Custom CSS must be **sanitize-safe**: WordPress runs `sanitize_textarea_field` on save, which
+strips/escapes any `<` (tag-like sequences) — the CSS reaches the renderer silently mangled; and
+the renderer appends a literal `\n`, so an unterminated final declaration dies in the browser
+parser. `css()` guards both at build; decompiled/imported foreign blobs are re-guarded by lint.
+[`custom-css-sanitize`]
+
 ## 3. Theme discipline
 
 - Brand colors, fonts, radii, spacing live in `defineTheme` — components read `t.color.primary`,

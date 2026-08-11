@@ -243,6 +243,25 @@ const RULES = [
     },
   },
   {
+    // custom_css survives a WordPress save only if it's sanitize-safe: Elementor decodes →
+    // sanitize_textarea_field → re-encodes, and ANY '<' is stripped/escaped there ('<…>' dies as
+    // a tag, a bare '<' becomes &lt;) — the CSS reaches the renderer mangled with zero errors.
+    // And the renderer appends a literal \n two-char sequence, so a final declaration missing its
+    // ';'/'}' silently dies in the browser parser. css() guards kit-authored CSS at build; this
+    // rule re-guards FOREIGN blobs (decompiled/imported/hand-built bundles).
+    id: 'custom-css-sanitize', severity: 'error',
+    run(bundle) {
+      const out = [];
+      for (const { owner, css } of allCustomCss(bundle)) {
+        const t = css.trimEnd();
+        const lt = t.indexOf('<');
+        if (lt !== -1) out.push(F(this.id, this.severity, owner, `custom_css contains '<' (…${t.slice(Math.max(0, lt - 12), lt + 12)}…) — sanitize_textarea_field strips/escapes tag-like sequences on save, so this CSS arrives mangled`, 'use the CSS escape \\3C (content:"\\3C") or restructure the rule'));
+        if (t && !t.endsWith(';') && !t.endsWith('}')) out.push(F(this.id, this.severity, owner, `custom_css ends without ';' or '}' ("…${t.slice(-24)}") — the renderer appends a literal \\n two-char sequence, so the last declaration dies in the browser parser`, "terminate the final declaration with ';' (css() auto-guards kit CSS; re-guard foreign/imported blobs)"));
+      }
+      return out;
+    },
+  },
+  {
     id: 'raw-atomic-overlap', severity: 'warn',
     run(bundle) {
       const out = [];
@@ -359,6 +378,11 @@ export function lintBundle(bundle) {
       if (ff && (ff.$$type === 'string' || ff.$$type === 'font-family')) fams.add(String(ff.value).split(',')[0].trim().replace(/^["']|["']$/g, ''));
     }
     if (fams.size) verified.push(`${fams.size} font famil${fams.size === 1 ? 'y' : 'ies'} covered (native enqueue or loader): ${[...fams].slice(0, 6).join(', ')}`);
+  }
+  if (!dirty.has('custom-css-sanitize')) {
+    let blobs = 0;
+    for (const _ of allCustomCss(bundle)) blobs++;
+    if (blobs) verified.push(`${blobs} custom_css blob(s) sanitize-safe (no '<' mangle, terminated declarations)`);
   }
   if (!dirty.has('duplicate-page-slug')) verified.push(`${(bundle.pages || []).length} page slug(s) unique`);
   return { findings, counts, verified };

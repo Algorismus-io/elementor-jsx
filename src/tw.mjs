@@ -14,9 +14,13 @@
  *   - A known long tail (uppercase, truncate, z-index, transforms, filters, child-combinator
  *     utilities like space-y/divide-y…) falls back to `raw` CSS. scale/rotate/translate compose
  *     into ONE transform:; blur/brightness/grayscale into ONE filter:.
- *   - `hover:`/`focus:` variants compile to raw `&:hover { … }` blocks for declarations that
- *     have a CSS form (colors, background, border, shadow, opacity, transform…). Other state
- *     variants (group-hover:, active:…) still throw.
+ *   - State prefixes `hover:`/`focus:`/`active:`/`focus-visible:`/`checked:` SPLIT BY
+ *     EXPRESSIBILITY: when EVERY utility in a state's bucket maps to a schema prop, the bucket
+ *     becomes a NATIVE state variant (out.hover = sx shorthand — editor-visible in the state UI,
+ *     schema-validated); if ANY utility needs raw CSS, the WHOLE bucket falls back to one raw
+ *     `&:state { … }` block. Deterministic: raw-fallback iff the bucket has ≥1 raw-only utility.
+ *     `group-hover:`/`focus-within:`/`visited:`/`disabled:` have no meta.state equivalent and
+ *     throw with the raw="" recipe.
  *   - Everything else THROWS naming the token — a silently-dropped class is a visual bug only a
  *     screenshot catches. Mobile-first prefixes and gradient synthesis get targeted errors with
  *     the working recipe.
@@ -130,6 +134,10 @@ function parseBucket(tokens) {
   for (const tok of tokens) {
     let m;
     switch (true) {
+      /* nested prefixes never reach a bucket legally — name the working recipe instead of "unknown utility" */
+      case /^(hover|focus|active|focus-visible|checked|group-hover|focus-within|visited|disabled|tablet|mobile|max-lg|max-md|max-sm|sm|md|lg|xl|2xl):/.test(tok):
+        fail(tok, 'prefixes cannot nest — author flat (hover:bg-…, max-md:p-4); breakpoint-scoped states go through hover={{ tablet: { … } }} or css(n, …, { breakpoint, state })');
+        break;
       /* ── display / flex / grid ── */
       case tok === 'flex' || tok === 'grid' || tok === 'block' || tok === 'inline-block' || tok === 'inline-flex' || tok === 'inline':
         o.display = tok;
@@ -424,51 +432,96 @@ function sizeProp(o, key, v, R, cssName) {
   else o[key] = v;
 }
 
-/* sx shorthand key → css declaration, for hover:/focus: blocks (atomic props have no state
- * variants, so state styling ALWAYS goes through raw `&:hover { … }`). Only keys with an obvious
- * single-declaration CSS form are mapped; anything else throws with the raw="" recipe. */
+/* State prefixes with a native meta.state equivalent (Elementor Style_States; e--selected /
+ * e--disabled are editor-machinery class states, kit-only — no tw spelling). */
+const NATIVE_STATES = ['hover', 'active', 'focus', 'focus-visible', 'checked'];
+/* States tw must NOT silently reinterpret — each error names the working recipe. */
+const RAW_ONLY_STATES = {
+  'group-hover': 'group-hover: needs the .group parent machinery (no meta.state equivalent) — put the rule on the PARENT: raw="&:hover .child { … }"',
+  'focus-within': 'focus-within: has no meta.state equivalent — use raw="&:focus-within { … }"',
+  visited: 'visited: has no meta.state equivalent — use raw="&:visited { … }"',
+  disabled: 'disabled: has no meta.state equivalent (e--disabled is an editor-machinery class, kit stateVariant only) — use raw="&:disabled { … }"',
+};
+
+/* sx shorthand key → css declaration, for the RAW state fallback (a state bucket that mixes
+ * schema-mappable and raw-only utilities renders ENTIRELY as one `&:state { … }` block, so every
+ * key parseBucket can emit needs a CSS form here — full coverage keeps the split deterministic). */
+const px = (v) => (typeof v === 'number' ? v + 'px' : v === 'hug' ? 'fit-content' : v);
+const sideCss = (v) => (v === 'auto' ? 'auto' : px(v));
+const boxCss = (name, v) => {
+  if (typeof v === 'number') return `${name}: ${v}px;`;
+  if (Array.isArray(v)) return `${name}: ${v.map(sideCss).join(' ')};`;
+  const S = { t: 'top', r: 'right', b: 'bottom', l: 'left' };
+  return Object.entries(v).map(([k, x]) => `${name}-${S[k]}: ${sideCss(x)};`).join(' ');
+};
+const tracksCss = (v) => (typeof v === 'number' ? `repeat(${v}, 1fr)` : v);
 const STATE_CSS = {
   color: (v) => `color: ${v};`,
   bg: (v) => `background: ${v};`,
-  size: (v) => `font-size: ${typeof v === 'number' ? v + 'px' : v};`,
+  size: (v) => `font-size: ${px(v)};`,
   weight: (v) => `font-weight: ${v};`,
-  radius: (v) => `border-radius: ${typeof v === 'number' ? v + 'px' : v};`,
+  radius: (v) => `border-radius: ${px(v)};`,
   border: (v) => `border: ${v[0]}px solid ${v[1]};`,
   shadow: (v) => `box-shadow: 0 ${v[0]}px ${v[1]}px ${v[2]}px ${v[3]};`,
+  display: (v) => `display: ${v};`,
+  dir: (v) => `flex-direction: ${v};`,
+  wrap: (v) => `flex-wrap: ${v};`,
+  align: (v) => `align-items: ${v};`,
+  justify: (v) => `justify-content: ${v};`,
+  flex: (v) => `flex: ${v};`,
+  gap: (v) => `gap: ${px(v)};`,
+  gapX: (v) => `column-gap: ${px(v)};`,
+  gapY: (v) => `row-gap: ${px(v)};`,
+  gridCols: (v) => `grid-template-columns: ${tracksCss(v)};`,
+  gridRows: (v) => `grid-template-rows: ${tracksCss(v)};`,
+  span: (v) => `grid-column: span ${v};`,
+  rowSpan: (v) => `grid-row: span ${v};`,
+  pad: (v) => boxCss('padding', v),
+  m: (v) => boxCss('margin', v),
+  w: (v) => `width: ${px(v)};`,
+  h: (v) => `height: ${px(v)};`,
+  minh: (v) => `min-height: ${px(v)};`,
+  maxw: (v) => `max-width: ${px(v)};`,
+  ta: (v) => `text-align: ${v};`,
+  lh: (v) => `line-height: ${typeof v === 'number' && v > 4 ? v + 'px' : v};`,
+  ls: (v) => `letter-spacing: ${v}em;`,
+  fit: (v) => `object-fit: ${v};`,
+  pos: (v) => `position: ${v};`,
 };
 
 /**
- * Parse a Tailwind utility string → sx-input shorthand (plus `raw`, `tablet`, `mobile`).
- * Desktop-first: base tokens are desktop; max-lg:→tablet, max-md:/max-sm:→mobile;
- * tablet:/mobile: literal prefixes also accepted. hover:/focus: compile to raw &:hover/&:focus
- * blocks. Mobile-first (md:, lg:) and other state prefixes throw — sx has no state variants and
- * silent reinterpretation of mobile-first semantics would misrender.
+ * Parse a Tailwind utility string → sx-input shorthand (plus `raw`, `tablet`, `mobile`, and one
+ * key per authored state). Desktop-first: base tokens are desktop; max-lg:→tablet,
+ * max-md:/max-sm:→mobile; tablet:/mobile: literal prefixes also accepted.
+ * State prefixes (hover:/focus:/active:/focus-visible:/checked:) split by EXPRESSIBILITY:
+ * a bucket whose every utility maps to a schema prop becomes `out.<state> = {sx shorthand}`
+ * (→ a NATIVE state variant downstream); a bucket with ≥1 raw-only utility renders entirely as a
+ * raw `&:state { … }` block appended to `out.raw`. Mobile-first (md:, lg:) and no-equivalent
+ * states (group-hover: …) throw — silent reinterpretation would misrender.
  */
 export function twToSx(str) {
-  const buckets = { desktop: [], tablet: [], mobile: [], hover: [], focus: [] };
+  const buckets = { desktop: [], tablet: [], mobile: [] };
+  for (const st of NATIVE_STATES) buckets[st] = [];
   for (const tok of String(str).trim().split(/\s+/).filter(Boolean)) {
     const m = tok.match(/^([a-z0-9-]+):(.+)$/);
     if (!m) { buckets.desktop.push(tok); continue; }
     const [, pre, rest] = m;
     if (pre === 'tablet' || pre === 'max-lg') buckets.tablet.push(rest);
     else if (pre === 'mobile' || pre === 'max-md' || pre === 'max-sm') buckets.mobile.push(rest);
-    else if (pre === 'hover' || pre === 'focus') buckets[pre].push(rest);
+    else if (NATIVE_STATES.includes(pre)) buckets[pre].push(rest);
     else if (/^(sm|md|lg|xl|2xl)$/.test(pre)) fail(tok, 'mobile-first breakpoints are not supported — author desktop-first: base = desktop, max-lg: = tablet, max-md: = mobile');
-    else if (/^(active|group-hover|focus-within|focus-visible|visited|disabled)$/.test(pre)) fail(tok, 'state variants beyond hover:/focus: are not supported — use raw="&:active { … }"');
+    else if (RAW_ONLY_STATES[pre]) fail(tok, RAW_ONLY_STATES[pre]);
     else fail(tok, 'unknown variant prefix');
   }
   const d = parseBucket(buckets.desktop);
   const out = { ...d.o };
   const rawChunks = d.raw.slice();
-  for (const st of ['hover', 'focus']) {
+  for (const st of NATIVE_STATES) {
     if (!buckets[st].length) continue;
     const b = parseBucket(buckets[st]);
-    const decls = b.raw.slice();
-    for (const [k, v] of Object.entries(b.o)) {
-      const fn = STATE_CSS[k];
-      if (!fn) fail(`${st}:${buckets[st].join(` ${st}:`)}`, `${st}: supports color/background/border/radius/shadow/typography and raw-CSS utilities — layout changes on ${st} go through raw="&:${st} { … }"`);
-      decls.push(fn(v));
-    }
+    if (!b.raw.length) { out[st] = b.o; continue; }        // every utility schema-mappable → NATIVE state variant
+    const decls = b.raw.slice();                            // ≥1 raw-only utility → the WHOLE bucket goes raw
+    for (const [k, v] of Object.entries(b.o)) decls.push(STATE_CSS[k](v));
     rawChunks.push(`&:${st} { ${decls.join(' ')} }`);
   }
   if (rawChunks.length) out.raw = rawChunks.join(' ');
@@ -483,7 +536,8 @@ export function twToSx(str) {
 
 /**
  * Expand a props object's `tw` into sx shorthand. EXPLICIT sx props win over tw on conflict;
- * `raw` strings concatenate (tw first); tablet/mobile shallow-merge per key.
+ * `raw` strings concatenate (tw first); tablet/mobile AND state objects (hover/active/…)
+ * shallow-merge per key.
  */
 export function mergeTw(props = {}) {
   if (!props.tw) return props;
@@ -491,7 +545,7 @@ export function mergeTw(props = {}) {
   const t = twToSx(tw);
   const merged = { ...t, ...rest };
   if (t.raw && rest.raw) merged.raw = `${t.raw}\n${rest.raw}`;
-  for (const bp of ['tablet', 'mobile']) {
+  for (const bp of ['tablet', 'mobile', ...NATIVE_STATES]) {
     if (t[bp] && rest[bp]) merged[bp] = { ...t[bp], ...rest[bp] };
   }
   return merged;

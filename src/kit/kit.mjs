@@ -196,6 +196,33 @@ export const CUSTOM_CSS = (declarations) => ({
   raw: Buffer.from(declarations, 'utf8').toString('base64'),
 });
 
+/* ── attributes (settings-level HTML attributes; storage verified on 4.2.1) ──
+ * Envelope: {$$type:'attributes', value:[key-value…]} — declared on effectively every atomic
+ * element schema. NOTE the honest contract: attributes are STORED & editor-validated on Elementor
+ * 4.2.1, but FREE core's DOM transformer is STUBBED there (PHP returns null) — no front-end
+ * emission. Elementor Pro >= 4.1 registers its own transformer (license feature
+ * `atomic-custom-attributes`) and DOES emit them (live-verified 4.2.1 + Pro 4.1.0; core esc_attr's
+ * key+value at save). Verified per-version by the certification suite; on free installs the
+ * runtime-carrier html widget + `_cssid` remain the JS-hook path of record. */
+const ATTR_NAME_RE = /^[a-zA-Z][a-zA-Z0-9:._-]*$/;
+const ATTR_BLOCKED = {
+  class: 'Elementor owns the class attribute (settings.classes) — use cls=/gcls= (or bindClass) instead',
+  id: 'the id attribute is the _cssid setting — use the id prop (id="anchor") instead',
+  style: 'inline style attributes never reach atomic output — use sx/tw props, or raw= custom CSS',
+};
+/** {name: value} → the attributes envelope. Validates attribute-name grammar and hard-blocks
+ * class/id/style/on* (core esc_attr's key+value but does NO name filtering — we must). */
+export const ATTRS = (obj) => {
+  const entries = Object.entries(obj || {});
+  for (const [k] of entries) {
+    const lk = k.toLowerCase();
+    if (ATTR_BLOCKED[lk]) throw new Error(`ATTRS: "${k}" is blocked — ${ATTR_BLOCKED[lk]}`);
+    if (/^on/.test(lk)) throw new Error(`ATTRS: "${k}" is blocked — on* event-handler attributes are not allowed (core would store them verbatim; script injection). JS hooks go through the runtime-carrier html widget + _cssid`);
+    if (!ATTR_NAME_RE.test(k)) throw new Error(`ATTRS: "${k}" is not a valid attribute name — must match ${ATTR_NAME_RE} (letters first, then letters/digits/:._-)`);
+  }
+  return { $$type: 'attributes', value: entries.map(([k, v]) => KV(k, String(v))) };
+};
+
 /* ───────────────────────────────── node construction ───────────────────────────────── */
 
 /**
@@ -216,12 +243,12 @@ export function node(elType, opts = {}, _positionalChildren) {
         `Positional (props, children) is the col/row/grid/sect helper convention only.`,
     );
   }
-  const { tag, widgetType, props = {}, settings = {}, children = [] } = opts;
+  const { tag, widgetType, props = {}, settings = {}, attrs, children = [] } = opts;
   const nid = freshId();
   const n = {
     id: nid,
     elType,
-    settings: { ...(tag ? { tag: S(tag) } : {}), ...settings },
+    settings: { ...(tag ? { tag: S(tag) } : {}), ...(attrs && Object.keys(attrs).length ? { attributes: ATTRS(attrs) } : {}), ...settings },
     styles: {},
     elements: children,
   };
@@ -244,21 +271,18 @@ export function node(elType, opts = {}, _positionalChildren) {
   return n;
 }
 
-/**
- * Attach raw CSS declarations to a node's style variant as `custom_css` (Pro-only escape hatch;
- * base64-encoded `{raw}` per contract 11 — plain CSS silently no-ops). `decls` are declarations
- * for the element itself (`color: red;`) or nested rules (`& em { color: #f43; }` — the accent
- * recipe: html-v3 strips inline style attrs, so accents MUST go through nested custom_css).
- * NEVER put this object shape into PAGE settings — page-settings custom_css is a PLAIN STRING
- * (the AF1 inverse trap; the object shape fatals Pro sitewide there).
- */
-export function css(n, decls, { breakpoint = 'desktop' } = {}) {
-  // Terminate the chunk: the renderer joins chunks/lines with \n, so a final declaration missing
-  // its ';' silently dies in the browser's CSS parser (real incident: a raw ending in `top:598px`
-  // dropped top/overflow/background across a whole hero). `}`-terminated chunks (nested rules,
-  // @media blocks) need no ';'.
-  decls = String(decls).trimEnd();
-  if (decls && !decls.endsWith(';') && !decls.endsWith('}')) decls += ';';
+/* Valid variant states, verbatim from Elementor's Style_States (style-states.php, 4.2.1).
+ * Pseudo states render as `:state` — with the documented QUIRK that `hover` renders as the
+ * comma pair `:hover, :focus-visible` (core's additional-states map; a11y-positive, accepted).
+ * The two e-- states render as CLASS selectors (editor/tabs machinery toggles them). */
+export const STYLE_STATES = new Set(['hover', 'active', 'focus', 'focus-visible', 'checked', 'e--selected', 'e--disabled']);
+const assertState = (state, who) => {
+  if (state != null && !STYLE_STATES.has(state)) {
+    throw new Error(`${who}: unknown state "${state}" — valid states are ${[...STYLE_STATES].join(' | ')} (Elementor Style_States)`);
+  }
+};
+/** Bootstrap a node's local style holder (and its R4 class link) if absent; returns the style record. */
+function ensureStyle(n) {
   let sid = Object.keys(n.styles ?? {})[0];
   if (!sid) {
     sid = `e-${n.id}-s`;
@@ -266,10 +290,43 @@ export function css(n, decls, { breakpoint = 'desktop' } = {}) {
     const refs = n.settings.classes?.value ?? [];
     n.settings.classes = CLS(refs.includes(sid) ? refs : [...refs, sid]);
   }
-  const st = n.styles[sid];
-  let v = (st.variants ?? []).find((x) => x.meta?.breakpoint === breakpoint && !x.meta?.state);
+  return n.styles[sid];
+}
+
+/**
+ * Attach raw CSS declarations to a node's style variant as `custom_css` (Pro-only escape hatch;
+ * base64-encoded `{raw}` per contract 11 — plain CSS silently no-ops). `decls` are declarations
+ * for the element itself (`color: red;`) or nested rules (`& em { color: #f43; }` — the accent
+ * recipe: html-v3 strips inline style attrs, so accents MUST go through nested custom_css).
+ * `{state}` targets a state variant ('hover' | 'active' | 'focus' | 'focus-visible' | 'checked' |
+ * 'e--selected' | 'e--disabled') — the CSS renders inside the state selector block (per-state
+ * custom CSS, combinable with {breakpoint} for e.g. tablet-hover).
+ * NEVER put this object shape into PAGE settings — page-settings custom_css is a PLAIN STRING
+ * (the AF1 inverse trap; the object shape fatals Pro sitewide there).
+ */
+export function css(n, decls, { breakpoint = 'desktop', state = null } = {}) {
+  // Terminate the chunk: the renderer joins chunks/lines with \n, so a final declaration missing
+  // its ';' silently dies in the browser's CSS parser (real incident: a raw ending in `top:598px`
+  // dropped top/overflow/background across a whole hero). `}`-terminated chunks (nested rules,
+  // @media blocks) need no ';'.
+  decls = String(decls).trimEnd();
+  if (decls && !decls.endsWith(';') && !decls.endsWith('}')) decls += ';';
+  // Sanitize simulation: on save Elementor decodes → wp sanitize_textarea_field → re-encodes.
+  // ANY '<' is mangled there ('<…>' sequences are stripped as tags, a bare '<' is entity-escaped)
+  // — the CSS reaches the renderer altered with zero errors. Fail at build instead.
+  const lt = decls.indexOf('<');
+  if (lt !== -1) {
+    throw new Error(
+      `css: declarations contain '<' (…${decls.slice(Math.max(0, lt - 12), lt + 12)}…) — ` +
+        `sanitize_textarea_field runs on save and strips/escapes tag-like sequences, so this CSS ` +
+        `arrives mangled. Use the CSS escape \\3C (content:"\\3C") or restructure the rule.`,
+    );
+  }
+  assertState(state, 'css');
+  const st = ensureStyle(n);
+  let v = (st.variants ?? []).find((x) => x.meta?.breakpoint === breakpoint && (x.meta?.state ?? null) === state);
   if (!v) {
-    v = { meta: { breakpoint, state: null }, props: {} };
+    v = { meta: { breakpoint, state }, props: {} };
     st.variants.push(v);
   }
   // MERGE, don't overwrite (§css-overwrites-not-merges, field-found 2026-06-14): two css() calls on
@@ -882,22 +939,31 @@ export const iconChip = (
   );
 
 /**
- * Add a :hover style variant to a node (advanced interactivity — lift / color / background shift).
- * Pushes a {breakpoint:'desktop', state:'hover'} variant onto the node's local style (the style schema
- * lists `hover` among valid states). For a smooth transition, add one on the BASE via custom_css:
- * `css(card, 'transition: transform .18s ease, box-shadow .18s ease;')` then `hover(card, {...})`.
+ * Add a STATE style variant to a node (native, editor-visible in the state UI, schema-validated).
+ * `state` ∈ hover | active | focus | focus-visible | checked | e--selected | e--disabled (the two
+ * e-- states are editor-machinery CLASS selectors — kit-only, no tw/sx spelling). Create-or-merge
+ * on the {breakpoint, state} variant, mirroring css(). QUIRK (accepted, a11y-positive): Elementor
+ * renders the `hover` state as the comma pair `:hover, :focus-visible`; authored `focus-visible`
+ * maps to its own meta.state. For a smooth transition, add one on the BASE via custom_css:
+ * `css(card, 'transition: transform .18s ease;')` then `stateVariant(card, 'hover', {...})`.
  * Returns the node (chainable). State variants are validated by the PHP dry_run — run it.
  */
-export function hover(n, props, { breakpoint = 'desktop' } = {}) {
-  let sid = Object.keys(n.styles ?? {})[0];
-  if (!sid) {
-    sid = `e-${n.id}-s`;
-    n.styles = { [sid]: { id: sid, type: 'class', label: n.id, variants: [{ meta: { breakpoint: 'desktop', state: null }, props: {} }] } };
-    const refs = n.settings.classes?.value ?? [];
-    n.settings.classes = CLS(refs.includes(sid) ? refs : [...refs, sid]);
+export function stateVariant(n, state, props, { breakpoint = 'desktop' } = {}) {
+  if (state == null) throw new Error(`stateVariant: state is required — for base props use node()/styled(); valid states: ${[...STYLE_STATES].join(' | ')}`);
+  assertState(state, 'stateVariant');
+  const st = ensureStyle(n);
+  let v = (st.variants ?? []).find((x) => x.meta?.breakpoint === breakpoint && (x.meta?.state ?? null) === state);
+  if (!v) {
+    v = { meta: { breakpoint, state }, props: {} };
+    st.variants.push(v);
   }
-  n.styles[sid].variants.push({ meta: { breakpoint, state: 'hover' }, props });
+  Object.assign(v.props, props);
   return n;
+}
+
+/** :hover state variant — thin wrapper over stateVariant (kept exported for compat). */
+export function hover(n, props, { breakpoint = 'desktop' } = {}) {
+  return stateVariant(n, 'hover', props, { breakpoint });
 }
 
 /* ──────────────────────────── structural validation + emit ─────────────────────────── */

@@ -11,6 +11,11 @@
  *     which sx() spreads unchanged. So no styling is ever lost — pretty where possible, exact always.
  *   - Global classes (g-*) are kept as `cls` refs; their definitions live in the sidecar classes file.
  *   - custom_css (base64) is decoded to a `raw="…"` CSS string. Breakpoints (_t/_m) → tablet/mobile.
+ *   - STATE variants (hover/active/focus/focus-visible/checked) invert to state props:
+ *     hover={{ …sx, tablet: {…}, raw: "…" }} — incl. per-state custom_css and non-desktop
+ *     breakpoints. The two e-- class states (e--selected/e--disabled) have no JSX spelling, so a
+ *     node carrying one round-trips verbatim as <Raw> (zero loss, kit-only territory).
+ *   - settings.attributes (the key-value envelope) inverts to attrs={{…}}.
  */
 
 const b64d = (s) => Buffer.from(s, 'base64').toString('utf8');
@@ -154,15 +159,27 @@ function emitNode(n, ind, ctx) {
   const styleId = (s.classes?.value || []).find((c) => /^e-.*-s\d*$/.test(c) || (n.styles && n.styles[c]));
   const styleObj = styleId && n.styles ? n.styles[styleId] : (n.styles ? Object.values(n.styles)[0] : null);
 
-  // build sx from the desktop variant + collect breakpoints + custom_css → raw
+  // build sx from the desktop variant + collect breakpoints + custom_css → raw; STATE variants
+  // (hover/…) collect into their own per-state buckets (desktop sx + tablet/mobile nests + raw).
   let sxSrc = {}, pass = {}, rawCss = '', bp = {};
+  const stateSrc = {};   // state → { sx, pass, raw, tablet: {sx…}, mobile: {sx…} }
   if (styleObj) {
     for (const variant of styleObj.variants || []) {
-      if (variant.meta?.state) continue;   // hover/focus/etc — skip so it can't overwrite the base style
+      const state = variant.meta?.state;
+      // e--selected/e--disabled: editor-machinery class states with no JSX spelling — verbatim node.
+      if (state === 'e--selected' || state === 'e--disabled') {
+        return `${pad}<Raw>{${JSON.stringify(n)} /* ${state} state variant — kit stateVariant() territory */}</Raw>`;
+      }
       const inv = invertProps(variant.props || {});
       const cc = variant.props?.custom_css?.raw || variant.custom_css?.raw;
       const raw = cc ? b64d(cc) : '';
       const target = variant.meta?.breakpoint === 'mobile' ? '_m' : variant.meta?.breakpoint === 'tablet' ? '_t' : null;
+      if (state) {
+        const dst = (stateSrc[state] ??= { sx: {}, pass: {}, raw: '', tablet: null, mobile: null });
+        if (!target) { dst.sx = inv.sx; dst.pass = inv.pass; if (raw) dst.raw = raw; }
+        else dst[target === '_t' ? 'tablet' : 'mobile'] = { sx: inv.sx, pass: inv.pass, raw };
+        continue;
+      }
       if (!target) { sxSrc = inv.sx; pass = inv.pass; if (raw) rawCss = raw; }
       else bp[target] = { ...inv.sx, ...(raw ? { __raw: raw } : {}) };
     }
@@ -182,6 +199,29 @@ function emitNode(n, ind, ctx) {
   const attrs = [];
   const cls = classes.length ? classes.join(' ') : null;
   if (cls) attrs.push(`gcls={${q(cls)}}`);   // external global-class refs → gcls (deploy carries their defs)
+  // settings.attributes (key-value envelope) → attrs={{…}} (ATTRS() re-emits it on rebuild)
+  if (s.attributes?.$$type === 'attributes' && Array.isArray(s.attributes.value)) {
+    const ao = {};
+    for (const kv of s.attributes.value) {
+      const k = kv?.value?.key?.value;
+      if (k != null) ao[k] = kv?.value?.value?.value ?? '';
+    }
+    if (Object.keys(ao).length) attrs.push(`attrs={${JSON.stringify(ao)}}`);
+  }
+  // state variants → state props: hover={{ …sx, props: {…}, tablet: {…}, raw: "…" }}
+  const stateObjSrc = (b) => {
+    const parts = Object.entries(b.sx).map(([k, val]) => (k === 'center' ? 'center: true' : `${k}: ${val}`));
+    if (Object.keys(b.pass || {}).length) parts.push(`props: ${JSON.stringify(b.pass)}`);
+    for (const t of ['tablet', 'mobile']) {
+      if (b[t] && (Object.keys(b[t].sx).length || Object.keys(b[t].pass || {}).length || b[t].raw)) parts.push(`${t}: ${stateObjSrc(b[t])}`);
+    }
+    if (b.raw) parts.push(`raw: ${q(b.raw)}`);
+    return `{ ${parts.join(', ')} }`;
+  };
+  for (const [state, b] of Object.entries(stateSrc)) {
+    const src = stateObjSrc(b);
+    if (src !== '{  }') attrs.push(`${state}={${src}}`);
+  }
   // interactions round-trip: emit animate={[…interaction-item envelopes…]} — interact() passes
   // pre-built envelopes through verbatim (they used to be silently DROPPED on decompile).
   const ixItems = n.interactions?.items || (typeof n.interactions === 'string' ? (JSON.parse(n.interactions || '{}').items || []) : []);

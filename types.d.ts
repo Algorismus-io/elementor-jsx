@@ -80,6 +80,14 @@ export interface SxProps {
   props?: Record<string, unknown>;
 }
 
+/** Per-state style object (hover/active/focus/focus-visible/checked): the sx vocabulary plus
+ * `raw` (state-scoped custom CSS) — sx-mappable keys emit a NATIVE state variant (editor-visible
+ * in the state UI, schema-validated); `raw` lands as per-state custom_css. `tablet`/`mobile` nest
+ * INSIDE the state for breakpoint-scoped states (hover={{ tablet: {…} }}).
+ * QUIRK (accepted, a11y-positive): Elementor renders the hover state as the comma pair
+ * `:hover, :focus-visible`; an authored focus-visible state keeps its own variant. */
+export interface StateSx extends SxProps { raw?: string }
+
 /** Intrinsic JSX props = sx shorthand + the specials. */
 export interface IntrinsicProps extends SxProps {
   /** Tailwind-subset utility string (desktop-first: base = desktop, max-lg: = tablet,
@@ -95,6 +103,21 @@ export interface IntrinsicProps extends SxProps {
   gcls?: string;                      // external global-class refs (space-separated)
   dyn?: DynEnvelope;                  // dynamic-tag content binding (children ignored)
   animate?: AnimateOptions | AnimateOptions[] | unknown[];
+  /** HTML attributes (data-*, aria-*, rel, …) → the settings.attributes envelope. Names are
+   * grammar-validated; `class`/`id`/`style`/`on*` are hard-blocked at build (use cls/gcls, id,
+   * sx/raw instead — on* is never allowed). Stored & editor-validated on Elementor 4.2.1; DOM
+   * emission depends on Elementor enabling its transformer — verified per-version by the
+   * certification suite. Empirically: FREE core's transformer is stubbed (no DOM emission), while
+   * Pro >= 4.1 registers its own and DOES emit (live-verified 4.2.1 + Pro 4.1.0). On free installs
+   * the runtime-carrier + `_cssid` remain the JS-hook path. */
+  attrs?: Record<string, string>;
+  /** Native state variants (split by expressibility; see StateSx). tw prefixes hover:/focus:/
+   * active:/focus-visible:/checked: land here when fully schema-mappable. */
+  hover?: StateSx;
+  active?: StateSx;
+  focus?: StateSx;
+  'focus-visible'?: StateSx;
+  checked?: StateSx;
 }
 
 export interface ThemeSpec {

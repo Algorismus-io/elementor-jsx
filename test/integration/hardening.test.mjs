@@ -210,3 +210,62 @@ test('scale: 30-page data-driven site deploys, renders, and re-deploys idempoten
   const ids1 = Object.fromEntries(r1.pages.map((p) => [p.slug, String(p.id)]));
   for (const p of r2.pages) assert.equal(String(p.id), ids1[p.slug], `${p.slug} id stable`);
 });
+
+/* ── 6. 1.7.x certification: states + attributes (the version-flip detector) ── */
+test('1.7.x certification: native state variants + per-state custom_css render; attributes stored, DOM emission probed', skip, async (t) => {
+  const { h } = hmod;
+  const { elementorData, flat } = await import('./harness.mjs');
+  const probe = h('section', { pad: [40, 20] },
+    h('h1', { size: 32 }, 'Cert 17x'),
+    h('box', {
+      id: 'cert17x', pad: 20, bg: '#ffffff',
+      hover: { bg: '#0f172a' },                    // native hover state variant
+      active: { raw: 'letter-spacing: 2px;' },     // per-state custom_css
+      attrs: { 'data-exjsx-probe': 'attrs17x' },   // attributes envelope
+    }, h('text', {}, 'probe body')));
+  const bundle = compileSite(defineSite({
+    name: 'cert17x',
+    pages: [{ title: 'cert17x', slug: 'exjsx-cert-17x', seo: { title: 't', description: 'd' }, node: probe }],
+  }));
+  const rep = await deployBundle(bundle);
+  const pid = rep.pages[0].id;
+  assert.match(rep.pages[0].action, /^(created|updated)$/);
+
+  // (a) saved document JSON: state variants + attributes envelope persisted?
+  const saved = flat(elementorData(pid));
+  const target = saved.find((n) => n.settings?._cssid?.value === 'cert17x');
+  assert.ok(target, 'probe element saved');
+  const stored = target.settings.attributes;
+
+  // (b) rendered CSS: the hover variant rides the shared class; Elementor renders state `hover`
+  // as the comma pair `:hover, :focus-visible` (Style_States additional-states map — documented).
+  const { html, cssFlat } = await renderedPage('exjsx-cert-17x');
+  assert.match(cssFlat, /:hover[^{]*\{[^}]*background:#0f172a/i, 'native hover variant renders as a :hover rule');
+  assert.match(cssFlat, /:active[^{]*\{[^}]*letter-spacing:2px/i, 'per-state custom_css renders inside the state selector');
+
+  // (c) attributes: storage is version-dependent (schema key ships 4.2.x); DOM emission is the
+  // VERSION-FLIP DETECTOR. Empirical matrix (live-verified 2026-08-12 on 4.2.1 + Pro 4.1.0):
+  //   FREE core — transformer stubbed (returns null) → stored but NOT emitted;
+  //   PRO >= 4.1 — Pro_Attributes_Transformer (license `atomic-custom-attributes`) → EMITTED.
+  // The day the free-core assertion fails, Elementor un-stubbed it: flip docs/API-CARD.md +
+  // types.d.ts wording from "stored, not emitted on free" to "emitted".
+  const caps = await (await fetch(`${WP_URL}/wp-json/elementor-ultra/v1/site/capabilities`,
+    { headers: { Authorization: 'Basic ' + Buffer.from(`${process.env.WP_USER}:${process.env.WP_APP_PASSWORD}`).toString('base64') } })).json().catch(() => ({}));
+  const proActive = !!(caps?.data?.pro_active);
+  if (stored) {
+    assert.equal(stored.$$type, 'attributes', 'attributes envelope persisted');
+    assert.equal(stored.value?.[0]?.value?.key?.value, 'data-exjsx-probe');
+    if (proActive) {
+      assert.ok(/data-exjsx-probe="attrs17x"/.test(html),
+        'Pro is active but attributes did NOT reach the DOM — Pro pulled/regated its Pro_Attributes_Transformer; re-verify the API-card Pro claim.');
+    } else {
+      assert.ok(!/data-exjsx-probe/.test(html),
+        'ATTRIBUTES NOW REACH THE DOM ON FREE CORE — Elementor un-stubbed its attributes transformer on this version. ' +
+        'Update the version-gated language in docs/API-CARD.md + types.d.ts (attrs), then extend this probe to assert emission.');
+    }
+    t.diagnostic(`attributes DOM emission on this stack (pro_active=${proActive}): ${/data-exjsx-probe/.test(html) ? 'EMITTED' : 'not emitted'}`);
+  } else {
+    t.diagnostic('attributes envelope was stripped on save — this Elementor version has no attributes schema key (pre-4.2.x); storage contract starts at 4.2.x');
+    assert.ok(!/data-exjsx-probe/.test(html), 'no DOM emission either way');
+  }
+});

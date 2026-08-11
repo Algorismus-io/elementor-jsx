@@ -35,7 +35,16 @@ export function inlineLocal(bundle) {
       const decls = Buffer.from(b64, 'base64').toString('utf8').trim();
       if (!decls) continue;
       const bp = MEDIA[v.meta?.breakpoint] !== undefined ? v.meta.breakpoint : 'desktop';
-      (rawByBp[bp] || rawByBp.desktop).push(`.elementor .${sid}.${sid}{${decls}}`);
+      // STATE variants keep their selector (1.7.x per-state custom_css): pseudo states as
+      // `:state` — hover gets core's `:hover, :focus-visible` comma pair (Style_States
+      // additional-states map) — and the e-- editor states as class selectors.
+      const state = v.meta?.state;
+      const sels = !state ? ['']
+        : state.startsWith('e--') ? [`.${state}`]
+        : state === 'hover' ? [':hover', ':focus-visible']
+        : [`:${state}`];
+      const base = `.elementor .${sid}.${sid}`;
+      (rawByBp[bp] || rawByBp.desktop).push(`${sels.map((s) => base + s).join(',')}{${decls}}`);
       rawRules++;
     }
   };
