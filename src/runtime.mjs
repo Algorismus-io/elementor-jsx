@@ -108,15 +108,19 @@ function intrinsic(type, props, children) {
   // State objects (hover/active/focus/focus-visible/checked — sx vocabulary + raw) split out
   // BEFORE sx sees the props; applied as NATIVE state variants (+ per-state custom_css) below.
   const { rest: p2, states } = splitStates(mergeTw(props));
-  const { tag, dir, raw, href, id, alt, cls, gcls, dyn: dynTag, animate, attrs, ...style } = p2;
-  // animate={{effect,trigger,...}} (or an array) → motion interactions on the built node.
+  const { tag, dir, raw, href, id, alt, cls, gcls, dyn: dynTag, motion, animate, attrs, ...style } = p2;
+  // motion={{effect,trigger,…}} (or an array ≤5) → native interactions on the built node via
+  // interact()/interaction() — the JSX layer is a thin adapter, kit stays canonical. `animate`
+  // is the pre-1.8 spelling, kept as an alias; both at once is ambiguous → loud.
+  if (motion !== undefined && animate !== undefined) throw new Error(`exjsx: <${type}> has both motion and animate — they are the same prop (motion is canonical); pass one`);
+  const fx = motion ?? animate;
   // attrs={{'data-x':'y'}} → the settings.attributes envelope (STORED & editor-validated on
   // Elementor 4.2.1; DOM emission depends on Elementor enabling its transformer — verified
   // per-version by the certification suite).
   const withFx = (n) => {
     if (attrs && Object.keys(attrs).length) n.settings.attributes = ATTRS(attrs);
     applyStates(n, states);
-    return animate ? interact(n, animate) : n;
+    return fx ? interact(n, fx) : n;
   };
   switch (type) {
     case 'box': case 'div': case 'col': case 'row': case 'section': {
@@ -154,6 +158,7 @@ function intrinsic(type, props, children) {
     }
     case 'html':
       // classic html widget: no atomic settings/styles — attributes/state variants can't land here
+      if (fx) throw new Error('exjsx: motion on <html> — interactions render only on atomic elements (the classic html widget gets no data-interaction-id); wrap it in a <box motion={…}> instead');
       if (attrs && Object.keys(attrs).length) throw new Error('exjsx: attrs on <html> — the classic html widget has no attributes setting; write the attributes into the raw markup itself');
       if (Object.keys(states).length) throw new Error(`exjsx: ${Object.keys(states)[0]} state on <html> — the classic html widget carries no atomic styles; put a <style> block in the raw markup instead`);
       return { id: node('e-div-block').id, elType: 'widget', widgetType: 'html', settings: { html: raw ?? textOf(children) }, styles: {}, elements: [] };

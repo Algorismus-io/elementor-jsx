@@ -38,7 +38,7 @@ errors in an overlay; `--gates` re-runs the eu-studio check on changed pages aft
 NO `<nav> <main> <ul> <span> <a> <button>` intrinsics. Container tag override: `tag="header|footer|article|aside|a|button"`.
 Special props on all intrinsics: `tw=""` (Tailwind subset), `raw=""` (CSS decls, auto-terminated),
 `cls="name"` (semantic class label), `gcls="name"` (arbitrary extra class — style it yourself),
-`id="anchor"` (real HTML id — `href="#anchor"` works), `animate={{effect:'fade'|'slide'|'scale', trigger:'load'|'scrollIn', ...}}`,
+`id="anchor"` (real HTML id — `href="#anchor"` works), `motion={{effect:'fade'|'slide'|'scale', trigger:'load'|'scrollIn', ...}}` (see Motion),
 `attrs={{'data-x':'y'}}` (HTML attributes — see below), state objects `hover/active/focus/focus-visible/checked={{…sx, raw}}` (see States).
 
 ## States (hover / active / focus / focus-visible / checked)
@@ -72,6 +72,47 @@ certification suite. Empirical status: FREE core's transformer is stubbed (no DO
 and attributes DO reach the front-end DOM there (live-verified 4.2.1 + Pro 4.1.0, 2026-08-12;
 values are esc_attr'd at save). On free installs the runtime-carrier html widget + `_cssid`
 remain the JS-hook path of record.
+
+## Motion (native interactions — SPEC 1.8)
+
+`motion={{…}}` (one spec or an array ≤5 — 6 throws at build; the server would throw the WHOLE
+save) on any atomic intrinsic → Elementor's native Interactions (editable in the editor's
+Interactions tab, delivered by Elementor's own Motion lib — no custom JS). Kit level:
+`interact(node, opts|[opts])` / `interaction(opts)`; pre-built `interaction-item` envelopes pass
+through verbatim (the decompile round-trip). NOT valid on `<html>` (classic widget — no
+`data-interaction-id`).
+
+```jsx
+<section motion={{ effect: 'fade' }}>                      // scrollIn fade, 600ms (the defaults)
+<box motion={[{ effect: 'slide', direction: 'top', duration: 500, delay: 120 },
+              { trigger: 'load', effect: 'scale' }]}>
+<h1 motion={{ effect: 'fade', excludeOn: ['mobile'] }}>    // breakpoints envelope
+```
+
+- Fields: `trigger` (default **scrollIn**) `effect` (default fade) `type` (in|out) `direction`
+  `duration`/`delay` (ms) `excludeOn` (breakpoint names) + pro-flagged: `easing` `replay`
+  `relativeTo` `repeat`/`times` `start`/`end` (scrollOn %), `keyframes` (effect `'custom'`:
+  `[{stop: 0-100, opacity|move|rotate|scale|skew}]`, opacity ≤1 = fraction).
+- **Free-tier reality (lint warns — `pro-interaction`)**: free animates `load|scrollIn` ×
+  `fade|slide|scale` ONLY. hover/click/scrollOn/custom/easing/replay/repeat/… SAVE everywhere but
+  animate only with Pro; **`scrollOut` additionally CRASHES the free 4.2.1 handler at trigger
+  time** — never default to it.
+- **Save semantics**: the server silently STRIPS invalid items (no error, the animation just
+  never runs); `exjsx lint` mirrors validation.php exactly (`invalid-interaction`, error) — trust
+  the lint, not the save.
+- **Reduced motion (our a11y value-add — native Elementor ignores it)**: every compiled tree with
+  interactions gets a tiny guard that blanks the interactions JSON when
+  `prefers-reduced-motion: reduce` matches (elements render at final state). Opt out:
+  `site.config.mjs → motion: { respectReducedMotion: false }`.
+- **Delivery / gate detectability**: interactions ship as ONE footer JSON blob
+  `<script type="application/json" id="elementor-interactions-data">` + `data-interaction-id`
+  per element; Motion lib (`motion-js` handle) is enqueued only when items exist. Deterministic
+  screenshots (eu-studio gates): strip before capture —
+  `page.emulateMedia({ reducedMotion: 'reduce' })` (exjsx guard neutralizes everything), or
+  generically `page.addInitScript` a MutationObserver that sets
+  `#elementor-interactions-data`.textContent = '[]' on insertion (removing it AFTER load is too
+  late — consumers read it at wp_footer parse time). Optional motion smoke pass: scrollIn into
+  view, settle ≥ duration+delay, then capture.
 
 ## sx style props (on any intrinsic / box())
 

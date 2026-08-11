@@ -103,9 +103,14 @@ Field-verified on Elementor V4 @ wpos-stack, encoded in the integration assertio
   (Pro: hover/click/scrollOut/scrollOn); effects fade/slide/scale; **max 5 per element**
   (sanitizer cap, kit throws at 6). Rendered as a footer JSON blob
   (`#elementor-interactions-data`) + motion.min.js — cached in postmeta
-  `elementor-interactions-cache` (delete after direct meta writes). Kit: `interaction()`,
-  `interact(node, opts|[opts])`, intrinsic `animate={{effect,trigger,…}}`. Browser-proven:
-  opacity caught mid-fade → settles at 1.
+  `elementor-interactions-cache` (delete after direct meta writes). Kit: `interaction()`
+  (config key `config-v2`, `excludeOn` breakpoints, custom keyframes), `interact(node,
+  opts|[opts])`, intrinsic `motion={{effect,trigger,…}}` (`animate` = pre-1.8 alias). Server
+  strips invalid items SILENTLY → lint `invalid-interaction` mirrors validation.php;
+  `pro-interaction` warns on pro-flagged fields (scrollOut also CRASHES free 4.2.1). Compiled
+  trees with items get the reduced-motion guard widget (opt out via site `motion:
+  {respectReducedMotion:false}`). Browser-proven: opacity caught mid-fade → settles at 1;
+  reduced-motion emulation blanks the footer JSON (E2E 2026-08-12, :8947 Playground 4.2.1+Pro).
 - **POPUPS (Pro; `parts.popup`)**: a theme-builder document (`_elementor_template_type=popup`,
   location `popup`, printed via `wp_footer` → `elementor_theme_do_location('popup')`) + display
   meta `_elementor_popup_display_settings`. **Trigger groups are PHP mixed-key arrays

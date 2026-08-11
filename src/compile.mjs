@@ -53,6 +53,26 @@ function ensureRuntimeCarrier(elements) {
   return elements;
 }
 
+/* Reduced-motion guard (a11y — OUR value-add: native Elementor ships ZERO prefers-reduced-motion
+ * handling, source-verified 4.2.1). Interactions are JS-driven, so a CSS @media guard can't
+ * express the opt-out; instead every tree that carries interactions gets a tiny inline script
+ * that neutralizes the footer interactions JSON (#elementor-interactions-data → '[]') when the
+ * user prefers reduced motion — elements then simply render at their natural final state.
+ * TIMING: the JSON prints at wp_footer:10, its consumer scripts at wp_footer:20, and MutationObserver
+ * microtasks flush between parser-executed scripts — so neutralizing on the node's INSERTION always
+ * beats the consumer (plus a DOMContentLoaded sweep as belt-and-suspenders). Opt out via
+ * site.config.mjs / defineSite `motion: { respectReducedMotion: false }`. */
+export const MOTION_GUARD_SNIPPET = '<script data-exjsx-motion-guard>(function(){if(!matchMedia("(prefers-reduced-motion: reduce)").matches)return;var z=function(){var s=document.getElementById("elementor-interactions-data");return!!(s&&s.textContent!=="[]")&&(s.textContent="[]",!0)};if(!z()){var o=new MutationObserver(function(){z()&&o.disconnect()});o.observe(document.documentElement,{childList:true,subtree:true});addEventListener("DOMContentLoaded",function(){z();o.disconnect()})}})()</script>';
+function ensureMotionGuard(elements, respect) {
+  if (!respect) return elements;
+  let hasMotion = false;
+  (function walk(ns) { for (const n of ns || []) { if (n.interactions?.items?.length) hasMotion = true; walk(n.elements); } })(elements);
+  if (hasMotion) {
+    elements.push({ id: 'emguard', elType: 'widget', widgetType: 'html', settings: { html: MOTION_GUARD_SNIPPET }, styles: {}, elements: [] });
+  }
+  return elements;
+}
+
 /** popup display sugar → the meta shape Pro's Triggers reads. PHP stores each trigger group as
  * ['yes', 'delay'=>n] — mixed int+string keys — so the JSON must be {"0":"yes","delay":n}
  * (an ARRAY ['yes',{delay}] would decode to the wrong PHP shape). */
@@ -70,11 +90,14 @@ function normalizePopupDisplay(display) {
 export function compileSite(site) {
   if (!site?.$$site) throw new Error('compile: entry must default-export defineSite({...})');
   const { name, theme, pages, parts } = site;
+  const respectReducedMotion = site.motion?.respectReducedMotion !== false;   // default ON
   const fonts = new Set();
   const classMaps = [];
   let localStyleCount = 0;
   const compileTree = (node) => {
-    const elements = normalizeIds(ensureRuntimeCarrier(renderPage(node)));
+    // motion guard BEFORE the runtime carrier: the guard IS a classic widget, so it doubles as
+    // the webpack-runtime carrier when both would apply (one injected widget, not two).
+    const elements = normalizeIds(ensureRuntimeCarrier(ensureMotionGuard(renderPage(node), respectReducedMotion)));
     assertTree(elements);                       // validate WITH local styles (checks read style props)
     localStyleCount += countStyles(elements);
     classMaps.push(extractClasses(elements));   // dedup → shared classes; strips local styles in place

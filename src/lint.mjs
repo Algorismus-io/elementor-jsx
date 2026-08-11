@@ -88,6 +88,95 @@ function* walkEnvelopes(v, path = '') {
   else if (inner && typeof inner === 'object') { for (const [k, sub] of Object.entries(inner)) yield* walkEnvelopes(sub, path ? `${path}.${k}` : k); }
 }
 
+/* ── interactions (SPEC 1.8) — mirrors modules/interactions/validation.php field by field.
+ * The server SILENTLY STRIPS any invalid item on save (zero errors, the animation just never
+ * happens), so this lint is the ONLY honest failure surface; the one hard server failure is
+ * >5 items per element (the whole save throws). Enums verbatim from validation.php 4.2.1. */
+const IX = {
+  triggers: new Set(['load', 'scrollIn', 'scrollOut', 'scrollOn', 'hover', 'click']),
+  effects: new Set(['fade', 'slide', 'scale', 'custom']),
+  types: new Set(['in', 'out']),
+  directions: new Set(['', 'left', 'right', 'top', 'bottom', 'top-left', 'top-right', 'bottom-left', 'bottom-right']),
+  repeats: new Set(['', 'loop', 'times']),
+  kfSettings: new Set(['opacity', 'move', 'rotate', 'scale', 'skew']),
+};
+/** decode an `interactions` node key to its items array — same shapes validation.php accepts:
+ * {items:[…]} | {items:{$$type:'array',value:[…]}} | the whole thing as a JSON string. */
+function interactionItems(interactions) {
+  let v = interactions;
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return []; } }
+  if (!v || typeof v !== 'object') return [];
+  const items = v.items?.$$type === 'array' ? v.items.value : v.items;
+  return Array.isArray(items) ? items : [];
+}
+const isStr = (e, allowed = null) => e?.$$type === 'string' && typeof e.value === 'string' && (!allowed || allowed.has(e.value));
+const isSizeIn = (e, min = null, max = null) => e?.$$type === 'size' && typeof e.value?.size === 'number'
+  && (min === null || e.value.size >= min) && (max === null || e.value.size <= max);
+const isTiming = (e) => (e?.$$type === 'number' && typeof e.value === 'number' && e.value >= 0) || isSizeIn(e, 0);
+/** validate ONE interaction-item envelope; returns the reasons the SERVER would strip it. */
+function interactionItemProblems(item) {
+  const bad = [];
+  if (item?.$$type !== 'interaction-item' || !item.value || typeof item.value !== 'object') return ["not an {$$type:'interaction-item', value} envelope"];
+  const v = item.value;
+  if (v.interaction_id !== undefined && !isStr(v.interaction_id)) bad.push('interaction_id is not a string envelope');
+  if (!isStr(v.trigger, IX.triggers)) bad.push(`trigger '${v.trigger?.value ?? v.trigger}' — enum is ${[...IX.triggers].join('|')}`);
+  const a = v.animation;
+  if (a?.$$type !== 'animation-preset-props' || !a.value || typeof a.value !== 'object') {
+    bad.push(`animation.$$type '${a?.$$type}' — must be 'animation-preset-props' (the #1 silent-strip cause)`);
+    return bad;
+  }
+  const av = a.value;
+  if (!isStr(av.effect, IX.effects)) bad.push(`effect '${av.effect?.value ?? av.effect}' — enum is ${[...IX.effects].join('|')}`);
+  if (!isStr(av.type, IX.types)) bad.push(`type '${av.type?.value ?? av.type}' — enum is in|out`);
+  if (!isStr(av.direction, IX.directions)) bad.push(`direction '${av.direction?.value ?? av.direction}' — enum is ''|left|right|top|bottom|top-left|top-right|bottom-left|bottom-right`);
+  const t = av.timing_config;
+  if (t?.$$type !== 'timing-config' || !t.value) bad.push("timing_config missing or not $$type 'timing-config'");
+  else {
+    if (!isTiming(t.value.duration)) bad.push('timing_config.duration — needs a ms size envelope (≥ 0)');
+    if (!isTiming(t.value.delay)) bad.push('timing_config.delay — needs a ms size envelope (≥ 0)');
+  }
+  const cv = av.config?.value;
+  if (av.config !== undefined && (!cv || typeof cv !== 'object')) bad.push('config envelope has no value object');
+  else if (cv) {
+    if (cv.replay !== undefined && !(cv.replay?.$$type === 'boolean' && typeof cv.replay.value === 'boolean')) bad.push('config.replay is not a boolean envelope');
+    for (const k of ['easing', 'relativeTo']) if (cv[k] !== undefined && !isStr(cv[k])) bad.push(`config.${k} is not a string envelope`);
+    if (cv.repeat !== undefined && !isStr(cv.repeat, IX.repeats)) bad.push(`config.repeat '${cv.repeat?.value ?? cv.repeat}' — enum is ''|loop|times`);
+    if (cv.times !== undefined && !(cv.times?.$$type === 'number' && typeof cv.times.value === 'number' && cv.times.value >= 1)) bad.push('config.times — needs a number envelope ≥ 1');
+    for (const k of ['start', 'end']) if (cv[k] !== undefined && !isSizeIn(cv[k], 0, 100)) bad.push(`config.${k} — needs a % size envelope in 0-100`);
+  }
+  if (av.effect?.value === 'custom') {
+    const kfs = av.custom_effect?.$$type === 'custom-effect' ? av.custom_effect.value?.keyframes : null;
+    if (kfs?.$$type !== 'keyframes' || !Array.isArray(kfs.value) || !kfs.value.length) {
+      bad.push("effect 'custom' without a non-empty custom_effect keyframes envelope");
+    } else {
+      kfs.value.forEach((kf, i) => {
+        if (kf?.$$type !== 'keyframe-stop' || !kf.value) return bad.push(`keyframes[${i}] is not a keyframe-stop envelope`);
+        if (!isSizeIn(kf.value.stop, 0, 100)) bad.push(`keyframes[${i}].stop — needs a % size envelope (required)`);
+        const st = kf.value.settings;
+        if (st?.$$type !== 'keyframe-stop-settings' || !st.value || typeof st.value !== 'object') return bad.push(`keyframes[${i}].settings — keyframe-stop-settings envelope required`);
+        const alien = Object.keys(st.value).filter((k) => !IX.kfSettings.has(k));
+        if (alien.length) bad.push(`keyframes[${i}].settings key(s) ${alien.join(', ')} — allowed: opacity|move|rotate|scale|skew`);
+      });
+    }
+  }
+  if (v.breakpoints !== undefined) {
+    const ex = v.breakpoints?.$$type === 'interaction-breakpoints' ? v.breakpoints.value?.excluded : null;
+    if (ex?.$$type !== 'excluded-breakpoints' || !Array.isArray(ex.value) || !ex.value.every((b) => isStr(b))) {
+      bad.push('breakpoints — needs interaction-breakpoints{excluded: excluded-breakpoints[string envelopes]}');
+    }
+  }
+  return bad;
+}
+/** every node carrying interactions, with its decoded items. */
+function* allInteractions(bundle) {
+  for (const page of pagesAndParts(bundle)) {
+    for (const { n } of walk(page.elements)) {
+      if (n.interactions == null) continue;
+      yield { owner: `${page.slug ?? page.type}#${n.id}`, items: interactionItems(n.interactions) };
+    }
+  }
+}
+
 const RULES = [
   {
     id: 'invalid-envelope', severity: 'error',
@@ -119,6 +208,46 @@ const RULES = [
             }
           }
         }
+      }
+      return out;
+    },
+  },
+  {
+    // SPEC 1.8: the server strips invalid interaction items with ZERO feedback — a page whose
+    // hero never fades in and never says why. Mirror validation.php exactly and fail loudly here.
+    id: 'invalid-interaction', severity: 'error',
+    run(bundle) {
+      const out = [];
+      for (const { owner, items } of allInteractions(bundle)) {
+        if (items.length > 5) out.push(F(this.id, this.severity, owner, `${items.length} interactions on one element — the server throws on >5 and the WHOLE page save fails`, 'keep at most 5 items per element'));
+        items.forEach((item, i) => {
+          for (const why of interactionItemProblems(item)) {
+            out.push(F(this.id, this.severity, `${owner} items[${i}]`, `${why} — the server strips this item SILENTLY on save`, 'author via motion={{…}} / interaction() (validator-exact envelopes) instead of hand-building'));
+          }
+        });
+      }
+      return out;
+    },
+  },
+  {
+    // Free-tier honesty: pro-flagged motion fields SAVE everywhere but only animate with Pro's
+    // handler — and scrollOut additionally crashes free 4.2.1 at trigger time. "Saves fine,
+    // animates never" is exactly the silent failure class this linter exists for.
+    id: 'pro-interaction', severity: 'warn',
+    run(bundle) {
+      const out = [];
+      const push = (owner, i, msg, fix) => out.push(F(this.id, this.severity, `${owner} items[${i}]`, msg, fix));
+      for (const { owner, items } of allInteractions(bundle)) {
+        items.forEach((item, i) => {
+          const v = item?.value; if (!v) return;
+          const trigger = v.trigger?.value;
+          if (trigger === 'scrollOut') push(owner, i, "trigger 'scrollOut' is Pro-only AND crashes the free 4.2.1 handler at trigger time (out-of-scope var)", "use trigger 'scrollIn' on free targets; scrollOut needs Pro");
+          else if (['scrollOn', 'hover', 'click'].includes(trigger)) push(owner, i, `trigger '${trigger}' saves everywhere but animates only with Pro's handler`, 'fine on Pro targets; use load/scrollIn for free-tier animation');
+          const av = v.animation?.value || {};
+          if (av.effect?.value === 'custom') push(owner, i, "effect 'custom' (keyframes) renders only with Pro's handler", 'fine on Pro targets; use fade/slide/scale for free-tier animation');
+          const cfg = Object.keys(av.config?.value || {});
+          if (cfg.length) push(owner, i, `config field(s) ${cfg.join(', ')} are DEAD on free (handler hardcodes defaultEasing + replay:false)`, 'they save and Pro animates them; drop them if the target is free-tier');
+        });
       }
       return out;
     },
@@ -383,6 +512,11 @@ export function lintBundle(bundle) {
     let blobs = 0;
     for (const _ of allCustomCss(bundle)) blobs++;
     if (blobs) verified.push(`${blobs} custom_css blob(s) sanitize-safe (no '<' mangle, terminated declarations)`);
+  }
+  if (!dirty.has('invalid-interaction')) {
+    let ix = 0;
+    for (const { items } of allInteractions(bundle)) ix += items.length;
+    if (ix) verified.push(`${ix} interaction item(s) validator-exact (the server strips invalid ones silently — this is the only surface that would have told you)`);
   }
   if (!dirty.has('duplicate-page-slug')) verified.push(`${(bundle.pages || []).length} page slug(s) unique`);
   return { findings, counts, verified };

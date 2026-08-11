@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+**Interactions / motion (SPEC 1.8)** — native entrance/scroll animations, source-verified
+against Elementor 4.2.1 free + live-verified on a 4.2.1+Pro Playground stack:
+- **`motion={{…}}` prop** (or array ≤5; 6 throws) on every atomic intrinsic → `interact()` /
+  `interaction()` — thin JSX adapter, kit stays canonical. `animate` remains as the pre-1.8
+  alias (both at once throws); `motion` on `<html>` throws (classic widget never gets
+  `data-interaction-id`). Default trigger is now **scrollIn** (never scrollOut — the free 4.2.1
+  handler CRASHES on it at trigger time).
+- **kit `interaction()`**: config envelope key fixed `'animation-config'` → **`'config-v2'`**
+  (Animation_Config_Prop_Type::get_key); `excludeOn: ['mobile']` → the interaction-breakpoints
+  envelope; pro config fields (`relativeTo`, `repeat`/`times`, `start`/`end`); custom-effect
+  `keyframes` with editor-exact envelopes (stop %, opacity fraction ×100, move px / rotate deg /
+  scale factor / skew deg with identity axis defaults); full enum guards (type, direction,
+  repeat, timing numbers).
+- **lint**: `invalid-interaction` (error) mirrors validation.php field-by-field — the server
+  SILENTLY STRIPS invalid items on save, so lint is the only honest failure surface (the one
+  hard server failure, >5 items, fails the whole save); `pro-interaction` (warn) flags
+  pro-only triggers/effects/config ("saves everywhere, animates with Pro"; scrollOut's free
+  crash is named). Positive verification line counts validated items.
+- **Reduced-motion guard (a11y value-add — native Elementor ships ZERO prefers-reduced-motion
+  handling)**: compiled trees carrying interactions get a tiny inline guard widget that blanks
+  the footer `#elementor-interactions-data` JSON on insertion when the user prefers reduced
+  motion (elements render at final state). Default ON; opt out via `site.config.mjs` /
+  `defineSite` → `motion: { respectReducedMotion: false }`.
+- **decompile**: interactions invert to friendly `motion={{…}}` opts (defaults omitted;
+  interaction_id re-minted — server treats it as opaque); custom-effect / alien-key items fall
+  back to verbatim envelopes (zero loss). Saved-shape (JSON string) interactions decode.
+- types: `MotionSpec` (+`MotionKeyframe`) with every pro-flagged field documented;
+  `AnimateOptions` deprecated alias. API card: Motion section incl. the gates strip-before-capture
+  recipe (`page.emulateMedia({reducedMotion:'reduce'})` or init-script JSON blanking).
+
 100% atomic-element coverage against Elementor 4.2.x:
 - **Native `e-grid`**: new `<grid cols rows>` intrinsic + `nativeGrid()` kit helper + `TRACKS`
   (grid-track-size: fr count / custom list) and `GAPXY` (two-axis layout-direction gap) envelopes.
