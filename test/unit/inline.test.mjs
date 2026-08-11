@@ -136,3 +136,13 @@ test('deployBundle dry: inline bundle reports variablesSkipped=inline and never 
   assert.match(r.variablesSkipped, /inline/);
   assert.doesNotMatch(r.variablesSkipped, /wp-cli unavailable/);
 });
+
+test('inline: per-state custom_css keeps its state selector (hover gets the :hover,:focus-visible comma pair) — 1.7.x', () => {
+  const b = buildBundle('site-st', h('box', { pad: 0, hover: { raw: 'outline: 2px solid red;' }, active: { raw: 'letter-spacing: 2px;' } }, h('text', { size: 14 }, 'x')));
+  inlineLocal(b);
+  const styleW = allNodes(b.pages[0].elements).find((n) => n.widgetType === 'html' && /outline: 2px solid red/.test(n.settings.html || ''));
+  assert.ok(styleW, 'state raw reaches the inline <style> block');
+  const html = styleW.settings.html;
+  assert.match(html, /\.elementor \.(e-[^.]+)\.\1:hover,\.elementor \.(e-[^.]+)\.\2:focus-visible\{outline: 2px solid red;\}/, 'hover rule carries the native comma pair, not a bare always-on selector');
+  assert.match(html, /:active\{letter-spacing: 2px;\}/, 'other pseudo states render as :state');
+});

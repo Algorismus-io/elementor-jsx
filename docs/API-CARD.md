@@ -38,7 +38,37 @@ errors in an overlay; `--gates` re-runs the eu-studio check on changed pages aft
 NO `<nav> <main> <ul> <span> <a> <button>` intrinsics. Container tag override: `tag="header|footer|article|aside|a|button"`.
 Special props on all intrinsics: `tw=""` (Tailwind subset), `raw=""` (CSS decls, auto-terminated),
 `cls="name"` (semantic class label), `gcls="name"` (arbitrary extra class — style it yourself),
-`id="anchor"` (real HTML id — `href="#anchor"` works), `animate={{effect:'fade'|'slide'|'scale', trigger:'load'|'scrollIn', ...}}`.
+`id="anchor"` (real HTML id — `href="#anchor"` works), `animate={{effect:'fade'|'slide'|'scale', trigger:'load'|'scrollIn', ...}}`,
+`attrs={{'data-x':'y'}}` (HTML attributes — see below), state objects `hover/active/focus/focus-visible/checked={{…sx, raw}}` (see States).
+
+## States (hover / active / focus / focus-visible / checked)
+
+- **State props** on any intrinsic (and `box()`/`styled()`): `hover={{ bg:'#0f172a', color:'#fff' }}`
+  → a NATIVE state variant (editor-visible in the state UI, schema-validated). Inside a state
+  object: the full sx vocabulary, `raw: "…"` (per-state custom CSS), and `tablet:/mobile:` nests
+  for breakpoint-scoped states (`hover={{ tablet: {…} }}`). Kit level: `stateVariant(node, state,
+  props, {breakpoint})` (`hover()` is a thin wrapper) and `css(node, decls, {breakpoint, state})`.
+- **tw prefixes** `hover:` `focus:` `active:` `focus-visible:` `checked:` — SPLIT BY
+  EXPRESSIBILITY: if every utility in a state's bucket maps to a schema prop, it becomes the
+  native state variant; if ANY utility needs raw CSS (`hover:underline`, transforms, opacity…),
+  the WHOLE bucket compiles to one raw `&:state { … }` block instead. Deterministic — mixed
+  buckets go raw.
+- `group-hover:` / `focus-within:` / `visited:` / `disabled:` have NO native state — they throw
+  with the `raw=""` recipe. `e--selected`/`e--disabled` (editor-machinery class states) are
+  kit-only via `stateVariant()`.
+- QUIRK (accepted, a11y-positive): Elementor renders the `hover` state as the comma pair
+  `:hover, :focus-visible`. An authored `focus-visible` state keeps its own variant.
+- Transitions live on the BASE: `raw="transition: background .18s ease;"` + `hover={{…}}`.
+
+## Attributes (attrs)
+
+`attrs={{'data-track':'cta', 'aria-label':'Close', rel:'noopener'}}` → the native
+`settings.attributes` envelope (kit: `ATTRS(obj)`, or `node(type, {attrs})`). Names are
+grammar-validated at build; `class`/`id`/`style`/`on*` are HARD-BLOCKED (use `cls`/`gcls`, `id`,
+sx/`raw` instead — `on*` never). **Version gate**: stored & editor-validated on Elementor 4.2.1;
+DOM emission depends on Elementor enabling its transformer — verified per-version by the
+certification suite. Until it flips, the runtime-carrier html widget + `_cssid` remain the
+JS-hook path of record.
 
 ## sx style props (on any intrinsic / box())
 

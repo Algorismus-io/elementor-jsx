@@ -22,11 +22,11 @@ export {
   textLink, divider, youtube, video, tabs, DYN, isDyn, dyn, IMG_DYN, interaction, interact,
   loopGrid, formInput, formTextarea, formSelect, formCheckbox, formLabel, formSubmit, field, form,
   formSuccessMessage, formErrorMessage, checkboxRow, normalizeFaValue,
-  faIcon, svgIcon, iconChip, hover, fontLoader, formSuccess
+  faIcon, svgIcon, iconChip, hover, stateVariant, STYLE_STATES, ATTRS, fontLoader, formSuccess
 } from './kit/kit.mjs';
 
 export {
-  FLEX, sx, bgImage, box, styled, bindClass, h2, h3, txt, eyebrow, accentHeading, sectionHeader,
+  FLEX, sx, splitStates, applyStates, bgImage, box, styled, bindClass, h2, h3, txt, eyebrow, accentHeading, sectionHeader,
   section, card, bento, cardGrid, stat, step, chip, logoStrip, testimonial, footer, ctaBand,
   navBar, browserMock, barChart, lineChart, donut, chatMock
 } from './kit/kit-components.mjs';

@@ -210,3 +210,51 @@ test('scale: 30-page data-driven site deploys, renders, and re-deploys idempoten
   const ids1 = Object.fromEntries(r1.pages.map((p) => [p.slug, String(p.id)]));
   for (const p of r2.pages) assert.equal(String(p.id), ids1[p.slug], `${p.slug} id stable`);
 });
+
+/* ── 6. 1.7.x certification: states + attributes (the version-flip detector) ── */
+test('1.7.x certification: native state variants + per-state custom_css render; attributes stored, DOM emission probed', skip, async (t) => {
+  const { h } = hmod;
+  const { elementorData, flat } = await import('./harness.mjs');
+  const probe = h('section', { pad: [40, 20] },
+    h('h1', { size: 32 }, 'Cert 17x'),
+    h('box', {
+      id: 'cert17x', pad: 20, bg: '#ffffff',
+      hover: { bg: '#0f172a' },                    // native hover state variant
+      active: { raw: 'letter-spacing: 2px;' },     // per-state custom_css
+      attrs: { 'data-exjsx-probe': 'attrs17x' },   // attributes envelope
+    }, h('text', {}, 'probe body')));
+  const bundle = compileSite(defineSite({
+    name: 'cert17x',
+    pages: [{ title: 'cert17x', slug: 'exjsx-cert-17x', seo: { title: 't', description: 'd' }, node: probe }],
+  }));
+  const rep = await deployBundle(bundle);
+  const pid = rep.pages[0].id;
+  assert.match(rep.pages[0].action, /^(created|updated)$/);
+
+  // (a) saved document JSON: state variants + attributes envelope persisted?
+  const saved = flat(elementorData(pid));
+  const target = saved.find((n) => n.settings?._cssid?.value === 'cert17x');
+  assert.ok(target, 'probe element saved');
+  const stored = target.settings.attributes;
+
+  // (b) rendered CSS: the hover variant rides the shared class; Elementor renders state `hover`
+  // as the comma pair `:hover, :focus-visible` (Style_States additional-states map — documented).
+  const { html, cssFlat } = await renderedPage('exjsx-cert-17x');
+  assert.match(cssFlat, /:hover[^{]*\{[^}]*background:#0f172a/i, 'native hover variant renders as a :hover rule');
+  assert.match(cssFlat, /:active[^{]*\{[^}]*letter-spacing:2px/i, 'per-state custom_css renders inside the state selector');
+
+  // (c) attributes: storage is version-dependent (schema key ships 4.2.x); DOM emission is the
+  // VERSION-FLIP DETECTOR — the transformer is stubbed through 4.2.1 (returns null), so the
+  // attribute must NOT reach the DOM. The day this assertion fails, Elementor enabled it:
+  // flip docs/API-CARD.md + types.d.ts wording from "stored, not emitted" to "emitted".
+  if (stored) {
+    assert.equal(stored.$$type, 'attributes', 'attributes envelope persisted');
+    assert.equal(stored.value?.[0]?.value?.key?.value, 'data-exjsx-probe');
+    assert.ok(!/data-exjsx-probe/.test(html),
+      'ATTRIBUTES NOW REACH THE DOM — Elementor un-stubbed its attributes transformer on this version. ' +
+      'Update the version-gated language in docs/API-CARD.md + types.d.ts (attrs), then extend this probe to assert emission.');
+  } else {
+    t.diagnostic('attributes envelope was stripped on save — this Elementor version has no attributes schema key (pre-4.2.x); storage contract starts at 4.2.x');
+    assert.ok(!/data-exjsx-probe/.test(html), 'no DOM emission either way');
+  }
+});

@@ -4,12 +4,17 @@
  *   <Raw>{node}</Raw>        → verbatim kit-node passthrough (for widget types with no JSX mapping)
  * Both return plain kit nodes, so render() passes them straight through.
  */
-import { button } from './kit/kit.mjs';
-import { sx } from './kit/kit-components.mjs';
+import { button, css, ATTRS } from './kit/kit.mjs';
+import { sx, splitStates, applyStates } from './kit/kit-components.mjs';
 
-/** e-button. Tolerant href (kit's button() throws on '#'/empty; decompiled links may be bare). */
-export const Button = ({ text = '', href, cls, gcls, ...style } = {}) => {
+/** e-button. Tolerant href (kit's button() throws on '#'/empty; decompiled links may be bare).
+ * State props (hover={{…}}) and attrs={{…}} round-trip like on intrinsics; raw → custom_css. */
+export const Button = ({ text = '', href, cls, gcls, raw, attrs, ...rest } = {}) => {
+  const { rest: style, states } = splitStates(rest);
   const n = button(text, href && href !== '#' ? href : '/', sx(style));
+  if (attrs && Object.keys(attrs).length) n.settings.attributes = ATTRS(attrs);
+  if (raw) css(n, raw);
+  applyStates(n, states);
   const ids = [gcls, cls].filter(Boolean).join(' ').trim().split(/\s+/).filter(Boolean);
   if (ids.length) {
     const cur = n.settings.classes?.value || [];

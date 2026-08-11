@@ -8,8 +8,8 @@
  *   - string    → an intrinsic: 'box'|'row'|'col'|'section'|'grid'|'h1..h3'|'text'|'html'|'img' → kit builder.
  * A returned kit node (has .elType) passes straight through — the escape hatch to raw kit.
  */
-import { box, sx, styled, h2 as kh2, h3 as kh3, txt as ktxt } from './kit/kit-components.mjs';
-import { heading, para, image, imageUrl, node, nativeGrid, LINK, interact } from './kit/kit.mjs';
+import { box, sx, styled, splitStates, applyStates, h2 as kh2, h3 as kh3, txt as ktxt } from './kit/kit-components.mjs';
+import { heading, para, image, imageUrl, node, nativeGrid, LINK, interact, ATTRS } from './kit/kit.mjs';
 import { mergeTw } from './tw.mjs';
 
 /* Symbol.for, not Symbol: a relative-import entry gets its OWN bundled runtime copy (the cli's
@@ -105,9 +105,19 @@ const addGcls = (n, gcls) => {
 function intrinsic(type, props, children) {
   const kids = () => render(children) || [];
   // tw="px-6 flex …" (Tailwind subset) expands to sx shorthand first; explicit props win.
-  const { tag, dir, raw, href, id, alt, cls, gcls, dyn: dynTag, animate, ...style } = mergeTw(props);
-  // animate={{effect,trigger,...}} (or an array) → motion interactions on the built node
-  const withFx = (n) => (animate ? interact(n, animate) : n);
+  // State objects (hover/active/focus/focus-visible/checked — sx vocabulary + raw) split out
+  // BEFORE sx sees the props; applied as NATIVE state variants (+ per-state custom_css) below.
+  const { rest: p2, states } = splitStates(mergeTw(props));
+  const { tag, dir, raw, href, id, alt, cls, gcls, dyn: dynTag, animate, attrs, ...style } = p2;
+  // animate={{effect,trigger,...}} (or an array) → motion interactions on the built node.
+  // attrs={{'data-x':'y'}} → the settings.attributes envelope (STORED & editor-validated on
+  // Elementor 4.2.1; DOM emission depends on Elementor enabling its transformer — verified
+  // per-version by the certification suite).
+  const withFx = (n) => {
+    if (attrs && Object.keys(attrs).length) n.settings.attributes = ATTRS(attrs);
+    applyStates(n, states);
+    return animate ? interact(n, animate) : n;
+  };
   switch (type) {
     case 'box': case 'div': case 'col': case 'row': case 'section': {
       const b = box({ ...style, raw, dir: type === 'row' ? 'row' : dir, tag: type === 'section' ? 'section' : tag }, kids());
@@ -143,6 +153,9 @@ function intrinsic(type, props, children) {
       return withFx(addGcls(markCls(pn, cls), gcls));
     }
     case 'html':
+      // classic html widget: no atomic settings/styles — attributes/state variants can't land here
+      if (attrs && Object.keys(attrs).length) throw new Error('exjsx: attrs on <html> — the classic html widget has no attributes setting; write the attributes into the raw markup itself');
+      if (Object.keys(states).length) throw new Error(`exjsx: ${Object.keys(states)[0]} state on <html> — the classic html widget carries no atomic styles; put a <style> block in the raw markup instead`);
       return { id: node('e-div-block').id, elType: 'widget', widgetType: 'html', settings: { html: raw ?? textOf(children) }, styles: {}, elements: [] };
     case 'img': {
       // URL src → inline alt works (transformer reads src.alt). Attachment-id src → alt comes

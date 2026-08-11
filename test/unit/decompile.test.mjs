@@ -227,3 +227,34 @@ test('decompile: native e-grid rebuilds through the real cli (grid → <grid> �
   assert.deepEqual(p['grid-template-rows'], { $$type: 'grid-track-size', value: { unit: 'fr', size: 2 } });
   assert.deepEqual(p.gap, { $$type: 'layout-direction', value: { column: { $$type: 'size', value: { unit: 'px', size: 16 } }, row: { $$type: 'size', value: { unit: 'px', size: 32 } } } });
 });
+
+test('decompile: STATE variants round-trip (native props + per-state raw + breakpoint nesting) — 1.7.x', async () => {
+  const { box } = await import('../../src/kit/kit-components.mjs');
+  const tree = [box({ pad: 0, hover: { bg: '#0f172a', raw: 'outline: none;', tablet: { color: '#5b6b72' } }, checked: { bg: '#059669' } }, [])];
+  const src = decompile(JSON.parse(JSON.stringify(tree)), { name: 'St', slug: 'st' });
+  assert.match(src, /hover=\{\{ bg: "#0f172a", tablet: \{ color: "#5b6b72" \}, raw: "outline: none;" \}\}/, 'hover state attr emitted');
+  assert.match(src, /checked=\{\{ bg: "#059669" \}\}/, 'checked state attr emitted');
+  const bundle = rebuild(tree, 'StRT');
+  const out = allNodes(bundle.pages[0].elements)[0];
+  const ref = (out.settings.classes?.value || []).find((c) => bundle.classes.items[c]);
+  const variants = bundle.classes.items[ref].variants;
+  const at = (bp, state) => variants.find((v) => v.meta.breakpoint === bp && (v.meta.state ?? null) === state);
+  assert.equal(at('desktop', 'hover').props.background.value.color.value, '#0f172a');
+  assert.equal(at('tablet', 'hover').props.color.value, '#5b6b72');
+  assert.equal(at('desktop', 'checked').props.background.value.color.value, '#059669');
+  assert.equal(Buffer.from(at('desktop', 'hover').custom_css.raw, 'base64').toString(), 'outline: none;', 'per-state custom_css survived');
+});
+
+test('decompile: ATTRIBUTES round-trip via attrs={…}; e-- class states fall back to <Raw> (kit-only) — 1.7.x', async () => {
+  const { node, stateVariant, ATTRS, C } = await import('../../src/kit/kit.mjs');
+  const tree = [node('e-div-block', { attrs: { 'data-track': 'cta', 'aria-label': 'Card' }, props: { padding: { $$type: 'dimensions', value: {} } } })];
+  const src = decompile(JSON.parse(JSON.stringify(tree)), { name: 'At', slug: 'at' });
+  assert.match(src, /attrs=\{\{"data-track":"cta","aria-label":"Card"\}\}/, 'attrs attr emitted');
+  const bundle = rebuild(tree, 'AtRT');
+  const out = allNodes(bundle.pages[0].elements)[0];
+  assert.deepEqual(out.settings.attributes, ATTRS({ 'data-track': 'cta', 'aria-label': 'Card' }), 'attributes envelope byte-identical');
+
+  const sel = stateVariant(node('e-div-block', { props: { padding: { $$type: 'dimensions', value: {} } } }), 'e--selected', { color: C('#f00') });
+  const src2 = decompile([JSON.parse(JSON.stringify(sel))], { name: 'Sel', slug: 'sel' });
+  assert.match(src2, /<Raw>\{.*e--selected state variant/, 'e-- state → verbatim Raw (no JSX spelling)');
+});

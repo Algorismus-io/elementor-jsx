@@ -106,6 +106,28 @@ test('lint: raw-atomic-overlap flags atomic-coverable declarations, spares neste
   assert.equal(of(lintBundle(nested), 'raw-atomic-overlap').length, 0, 'nested/pseudo raw is legitimate');
 });
 
+test('lint: custom-css-sanitize (error) re-guards FOREIGN blobs — tag-like "<" and unterminated declarations', () => {
+  // css() blocks these at build, so simulate a foreign/imported bundle by swapping the blob
+  const b = build(page('a', h('box', { raw: 'color: #fff;' }, h('h1', {}, 'x'))));
+  const cls = Object.values(b.classes.items).find((c) => c.variants.some((v) => v.custom_css));
+  const variant = cls.variants.find((v) => v.custom_css);
+  variant.custom_css.raw = Buffer.from('&::before { content: "<"; }', 'utf8').toString('base64');
+  const mangled = of(lintBundle(b), 'custom-css-sanitize');
+  assert.equal(mangled.length, 1);
+  assert.equal(mangled[0].severity, 'error');
+  assert.match(mangled[0].message, /sanitize_textarea_field/);
+  assert.match(mangled[0].fix, /\\3C/);
+  variant.custom_css.raw = Buffer.from('color: red; top: 598px', 'utf8').toString('base64');
+  const unterminated = of(lintBundle(b), 'custom-css-sanitize');
+  assert.equal(unterminated.length, 1);
+  assert.match(unterminated[0].message, /without ';' or '}'/);
+  // clean blobs get the positive assertion (silence isn't trusted; a stated verification is)
+  variant.custom_css.raw = Buffer.from('color: red;', 'utf8').toString('base64');
+  const clean = lintBundle(b);
+  assert.equal(of(clean, 'custom-css-sanitize').length, 0);
+  assert.ok(clean.verified.some((v) => /custom_css blob\(s\) sanitize-safe/.test(v)));
+});
+
 test('lint: oversized-raw (info) on >8 real declarations (custom properties don\'t count)', () => {
   const decls = 'opacity:.5; cursor:pointer; user-select:none; pointer-events:auto; transition:all .2s; transform:none; filter:blur(1px); isolation:isolate; content-visibility:auto; backdrop-filter:none;';
   const b = build(page('a', h('box', { raw: decls }, h('h1', {}, 'x'))));
