@@ -68,7 +68,7 @@ const GENERIC_FONT = /-apple-system|system-ui|BlinkMacSystemFont|sans-serif|seri
  * GRAD('l','i','n') — angle 'l' sailed through to the server and died there; bg:"linear-gradient"
  * shipped a gradient string inside a color envelope and rendered nothing. Post-compile lint is
  * the last line for hand-built/decompiled bundles too. */
-const SIZE_UNITS = new Set(['px', '%', 'em', 'rem', 'vw', 'vh', 'ch', 'vmin', 'vmax', 'deg', 'rad', 's', 'ms', 'auto', 'custom']);
+const SIZE_UNITS = new Set(['px', '%', 'em', 'rem', 'vw', 'vh', 'ch', 'vmin', 'vmax', 'deg', 'rad', 's', 'ms', 'auto', 'custom', 'fr']);
 /* Alignment enums from Elementor's style-schema.php — lint them here for hand-built/decompiled
  * bundles (the compiler already throws; a bundle from elsewhere deserves the same catch).
  * Incident: justify="between"/align="start" passed a 0-error lint, then the deploy 400d. */
@@ -103,6 +103,14 @@ const RULES = [
               const { unit, size } = env.value || {};
               if (unit !== 'auto' && unit !== 'custom' && !Number.isFinite(Number(size))) out.push(F(this.id, this.severity, at, `size envelope holds size '${size}'`, 'sizes need a numeric size (calc()/clamp() belong in raw CSS)'));
               if (unit != null && !SIZE_UNITS.has(unit)) out.push(F(this.id, this.severity, at, `size envelope has unknown unit '${unit}'`, `use one of ${['px', '%', 'em', 'rem', 'vw', 'vh', 'ch'].join('/')}`));
+            } else if (env.$$type === 'grid-track-size') {
+              // e-grid tracks: fr = repeat-count (positive int via Grid_Track_Renderer), custom = verbatim CSS track list
+              const { unit, size } = env.value || {};
+              if (unit === 'fr' && (!Number.isInteger(Number(size)) || Number(size) < 1)) out.push(F(this.id, this.severity, at, `grid-track-size fr envelope holds count '${size}' — repeat() needs a positive integer`, 'use TRACKS(n) for n equal columns, or TRACKS("240px 1fr") for custom lists'));
+              else if (unit === 'custom' && (typeof size !== 'string' || !size.trim())) out.push(F(this.id, this.severity, at, 'grid-track-size custom envelope holds an empty/non-string track list', 'pass a CSS track list string: TRACKS("240px 1fr 1fr")'));
+              else if (unit !== 'fr' && unit !== 'custom') out.push(F(this.id, this.severity, at, `grid-track-size envelope has unknown unit '${unit}'`, 'the schema allows fr (equal-track count) or custom (verbatim list) only'));
+            } else if (env.$$type === 'span' && typeof env.value !== 'number' && typeof env.value !== 'string') {
+              out.push(F(this.id, this.severity, at, `span envelope holds ${JSON.stringify(env.value)}`, 'grid-column/grid-row spans take a number (authored form; deploy adapts per Elementor version) or a CSS placement string'));
             } else if (env.$$type === 'string' && FLEX_ENUMS[prop] && !FLEX_ENUMS[prop].has(env.value)) {
               out.push(F(this.id, this.severity, at, `'${env.value}' isn't in Elementor's ${prop} enum — the server 400s on this`, `use one of: ${[...FLEX_ENUMS[prop]].join(' | ')}`));
             } else if (env.$$type === 'color' && typeof env.value === 'string') {
@@ -308,7 +316,7 @@ const RULES = [
       const out = [];
       for (const page of pagesAndParts(bundle)) {
         for (const { n } of walk(page.elements)) {
-          if ((n.elType === 'e-flexbox' || n.elType === 'e-div-block') && !(n.elements || []).length && !hasPurpose(n)) {
+          if ((n.elType === 'e-flexbox' || n.elType === 'e-div-block' || n.elType === 'e-grid') && !(n.elements || []).length && !hasPurpose(n)) {
             out.push(F(this.id, this.severity, `${page.slug ?? page.type}#${n.id}`, 'empty container with no size/background purpose', 'remove it, or give it a job (bg / min-height / spacer style)'));
           }
         }

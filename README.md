@@ -11,10 +11,11 @@ Built agent-first — typed props fail at build time, an authoritative server-si
 bad trees before they ever save, and MCP tools give an agent a real API instead of a blank file.
 Humans get the same ergonomics; the design center is the agent.
 
-React-level JSX → Elementor V4 compiler + one-shot deployer. Full Elementor catalog parity (atomic
-elements, theme parts, forms, loops, dynamic tags, interactions, SEO), certified on Elementor
-**4.1.4 → 4.2.1** (version adapters translate prop-format changes per version) by a **522-test**
-suite that runs against a real WordPress stack.
+React-level JSX → Elementor V4 compiler + one-shot deployer. Full Elementor catalog parity (every
+atomic element — flexbox/div-block, the native `e-grid` container (4.2+), the full e-form family
+including its status messages, tabs, media, loops — plus theme parts, dynamic tags, interactions,
+SEO), certified on Elementor **4.1.4 → 4.2.1** (version adapters translate prop-format changes per
+version) by a **678-test** suite that runs against a real WordPress stack.
 
 Pairs with the [Elementor Ultra MCP server](https://github.com/Algorismus-io/elementor-ultra-mcp)
 (the agent's ~90-tool control surface) and the [one-command installer](https://github.com/Algorismus-io/create-elementor-ultra).

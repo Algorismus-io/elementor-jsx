@@ -8,6 +8,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   form, field, formInput, formTextarea, formSelect, formCheckbox, formLabel, formSubmit,
+  formSuccessMessage, formErrorMessage, checkboxRow,
   KV, EMAIL_ACTION, assertTree, S, N, B, sect, P0, SZ,
 } from '../../src/kit/kit.mjs';
 import { resetIds, allNodes, deskProps } from '../helpers.mjs';
@@ -94,7 +95,49 @@ test('form: e-form element — name, action envelopes (FULL string envelopes in 
   assert.deepEqual(f.settings['actions-after-submit'], { $$type: 'string-array', value: [S('email'), S('collect-submissions')] });
   assert.equal(f.settings.email.$$type, 'email');
   assert.deepEqual(f.settings.webhook_url, S('https://hooks.test/x'));
-  assert.equal(f.elements.length, 1);
+  // submit + the two default status messages (native feedback — see the message tests below)
+  assert.equal(f.elements.length, 3);
+  assert.deepEqual(f.elements.slice(1).map((c) => c.elType), ['e-form-success-message', 'e-form-error-message']);
+});
+
+test('formSuccessMessage / formErrorMessage: native status-message elements with an e-paragraph child', () => {
+  const s = formSuccessMessage();
+  assert.equal(s.elType, 'e-form-success-message');
+  assert.equal(s.elements.length, 1);
+  assert.equal(s.elements[0].widgetType, 'e-paragraph');
+  assert.equal(s.elements[0].settings.paragraph.value.content.value, 'Great! We’ve received your information.');
+  const e = formErrorMessage('Nope, retry.');
+  assert.equal(e.elType, 'e-form-error-message');
+  assert.equal(e.elements[0].settings.paragraph.value.content.value, 'Nope, retry.');
+});
+
+test('form: default messages are appended (server does NOT auto-create them on REST save — live-probed 4.2.1)', () => {
+  const f = form({ name: 'x', actions: ['collect-submissions'], successMessage: 'Sent!' }, [formSubmit()]);
+  const types = f.elements.map((c) => c.elType);
+  assert.deepEqual(types.slice(-2), ['e-form-success-message', 'e-form-error-message']);
+  assert.equal(f.elements[1].elements[0].settings.paragraph.value.content.value, 'Sent!');
+});
+
+test('form: messages dedupe (author-placed message wins) and messages:false opts out', () => {
+  const own = formErrorMessage('custom error');
+  const f = form({ name: 'x' }, [formSubmit(), own]);
+  assert.equal(f.elements.filter((c) => c.elType === 'e-form-error-message').length, 1);
+  assert.equal(f.elements.filter((c) => c.elType === 'e-form-success-message').length, 1, 'missing one still auto-added');
+  const bare = form({ name: 'x', messages: false }, [formSubmit()]);
+  assert.equal(bare.elements.length, 1);
+});
+
+test('checkboxRow: e-form-checkbox-row is a CLASS on an e-flexbox (not an element type) — mirrors atomic-form build_checkbox_row', () => {
+  const r = checkboxRow('f-consent', 'I agree', { required: true });
+  assert.equal(r.elType, 'e-flexbox');
+  assert.equal(r.settings.classes.value[0], 'e-form-checkbox-row');
+  const [cb, lb] = r.elements;
+  assert.equal(cb.widgetType, 'e-form-checkbox');
+  assert.deepEqual(cb.settings._cssid, S('f-consent'), 'checkbox carries the id the label points at');
+  assert.deepEqual(cb.settings.required, B(true));
+  assert.equal(lb.widgetType, 'e-form-label');
+  assert.deepEqual(lb.settings['input-id'], S('f-consent'));
+  assertTree([r]);
 });
 
 test('form: a full contact form composes and passes assertTree', () => {

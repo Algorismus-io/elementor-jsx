@@ -156,3 +156,38 @@ test('lint: formatLint orders error > warn > info and carries the fix line', () 
   assert.match(out, /fix: /);
   assert.match(out.split('\n')[0], /error\(s\).*warning\(s\).*info/);
 });
+
+/* ── grid envelopes (invalid-envelope rule additions) ── */
+const rawBundle = (props) => ({
+  pages: [{ title: 'g', slug: 'g', seo, elements: [{
+    id: 'g1', elType: 'e-grid',
+    settings: { classes: { $$type: 'classes', value: ['e-g1-s'] } },
+    styles: { 'e-g1-s': { id: 'e-g1-s', type: 'class', label: 'g1', variants: [{ meta: { breakpoint: 'desktop', state: null }, props }] } },
+    elements: [{ id: 'g2', elType: 'widget', widgetType: 'e-heading', settings: { tag: { $$type: 'string', value: 'h1' }, classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [] }],
+  }] }],
+  classes: { items: {}, order: [] },
+});
+
+test('lint: invalid-envelope catches broken grid-track-size shapes, passes valid TRACKS forms', () => {
+  const bad = rawBundle({
+    'grid-template-columns': { $$type: 'grid-track-size', value: { unit: 'fr', size: 0 } },
+    'grid-template-rows': { $$type: 'grid-track-size', value: { unit: 'em', size: 2 } },
+  });
+  const f = of(lintBundle(bad), 'invalid-envelope');
+  assert.equal(f.length, 2, formatLint(lintBundle(bad)));
+  assert.match(f[0].message, /positive integer/);
+  assert.match(f[1].message, /unknown unit 'em'/);
+  const good = rawBundle({
+    padding: { $$type: 'dimensions', value: {} },
+    'grid-template-columns': { $$type: 'grid-track-size', value: { unit: 'fr', size: 3 } },
+    'grid-template-rows': { $$type: 'grid-track-size', value: { unit: 'custom', size: 'auto 1fr' } },
+    gap: { $$type: 'layout-direction', value: { column: { $$type: 'size', value: { unit: 'px', size: 16 } } } },
+  });
+  assert.equal(of(lintBundle(good), 'invalid-envelope').length, 0, formatLint(lintBundle(good)));
+});
+
+test('lint: empty-container covers e-grid too', () => {
+  const b = rawBundle({ padding: { $$type: 'dimensions', value: {} } });
+  b.pages[0].elements[0].elements = [];
+  assert.equal(of(lintBundle(b), 'empty-container').length, 1);
+});

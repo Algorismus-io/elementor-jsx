@@ -29,6 +29,7 @@ errors in an overlay; `--gates` re-runs the eu-studio check on changed pages aft
 | tag | notes |
 |---|---|
 | `box` `div` `col` `row` `section` | flex containers. `row` forces dir row; `section` renders `<section>` |
+| `grid` | NATIVE e-grid container (**Elementor ≥ 4.2** — on 4.1.x use `gridCols` on a box). `cols`/`rows`: number = equal fr tracks, string = custom list (`cols="240px 1fr"`). Defaults: cols 3, rows auto, gap 20, **mobile 1 column** (override: `mobile={{gridCols:2}}`). Children take `span`/`rowSpan` — a base `span` persists at mobile and creates an IMPLICIT extra column in the 1-col grid (screenshot-verified); reset it with `mobile={{span:1}}` when the grid collapses |
 | `h1 h2 h3 h4` / `heading` | text props below apply; inline `<em>/<strong>/<br>` children OK |
 | `text` `p` | paragraph; `href` renders a REAL anchor (use for links/buttons-as-links) |
 | `img` | `src` = URL string (inline `alt` OK) or attachment id (alt comes from media manifest) |
@@ -49,7 +50,8 @@ Anything else (`calc()`, `clamp()`, keywords, two-value gap) THROWS — put it i
 justify = center|start|end|flex-start|flex-end|space-between/around/evenly|stretch, shorthands
 `'between'/'around'/'evenly'` auto-map; align = same minus the space-* plus self-start/self-end —
 **NO baseline**, use flex-end) · `wrap center` · `display` · `flex` · `pos` ·
-`span` · `gridCols` (e.g. `'repeat(3, 360px)'` — add `raw="justify-content:center;"` or grids left-pin) ·
+`span` `rowSpan` (grid-column/row spans, integers) · `gridCols` `gridRows` (e.g. `'repeat(3, 360px)'` — add `raw="justify-content:center;"` or grids left-pin) ·
+`gapX gapY` (column/row gap — compile to ONE atomic two-axis gap envelope; tw `gap-x-*`/`gap-y-*` map here) ·
 `color bg` (hex — NOT gradient strings) · `bgImage` (url|id) `bgOpts`
 (`{color, size:'cover', position:'center center', repeat:'no-repeat', attachment}`) · `grad` (**array `[angle, from, to]`**,
 e.g. `grad={[135,'#0ff','#f0f']}` — a CSS gradient STRING throws; freeform gradients go in `raw="background-image:…;"`) ·
@@ -84,12 +86,18 @@ explicit units are honored: `lh="150%"`, `ls="2px"`) ·
   ```
   Input types: text|email|number|tel|password, or `textarea:true`. **There is NO radio widget in
   atomic Pro forms** — option-picker UIs are styled CHECKBOX fields (one per option, distinct ids)
-  or a select. **Use `collect-submissions`, NOT `email`, on Elementor 4.2.x + Pro 4.1.0** (email
+  or a select. `checkboxRow(id, label, {required})` emits the NATIVE checkbox row (e-flexbox with
+  the `e-form-checkbox-row` class — it's a class, not an element type — checkbox + linked label).
+  **Use `collect-submissions`, NOT `email`, on Elementor 4.2.x + Pro 4.1.0** (email
   action upstream-broken: validator and send-runner disagree). Submissions land in
-  `wp_e_submissions`. Add `formSuccess()` anywhere on the page for a visible "sent" state — the
-  atomic runner shows none.
-- `formSuccess({ message, sub, accent })` — canned success banner: hides the form, shows the banner
-  when the Pro ajax submit succeeds. One per page with a form.
+  `wp_e_submissions`.
+- Native feedback: `form()` auto-appends the e-form-success-message / e-form-error-message
+  elements (the core form handler flips `form-state-*` on submit and core CSS reveals them — they
+  are plain saved children, NOT runtime-created, so omitting them means zero feedback). Custom
+  copy: `successMessage:`/`errorMessage:` or place `formSuccessMessage('…')`/`formErrorMessage('…')`
+  yourself; opt out with `messages:false`.
+- `formSuccess({ message, sub, accent })` — legacy html-widget success banner (hides the form on
+  ajax success). Superseded by the native messages above; keep for pre-4.1.1 targets.
 
 ## Layout gotchas (each cost a real run)
 

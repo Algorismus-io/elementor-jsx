@@ -46,6 +46,9 @@ export interface SxProps {
   center?: boolean;
   radius?: number;
   gap?: number;
+  /** column-gap / row-gap — compile to ONE two-axis layout-direction gap envelope (a single axis is legal). */
+  gapX?: number | string;
+  gapY?: number | string;
   w?: number | string | 'hug' | 'auto';
   h?: number | string;
   maxw?: number;
@@ -62,9 +65,12 @@ export interface SxProps {
   lh?: number;
   ls?: number;
   span?: number;
+  /** grid-row span (number of rows the element spans; deploy adapts the envelope per Elementor version). */
+  rowSpan?: number;
   flex?: number;
   display?: string;
   gridCols?: number | string;
+  gridRows?: number | string;
   pos?: string;
   shadow?: [v: number, blur: number, spread: number, color: string] | Envelope;
   fit?: string;
@@ -190,6 +196,11 @@ type Children = unknown;
 interface WithChildren { children?: Children }
 /** box|div|row|col|section — container intrinsics (runtime.mjs intrinsic() switch). */
 interface ContainerProps extends IntrinsicProps, WithChildren {}
+/** <grid> — NATIVE e-grid container (Elementor ≥ 4.2). cols/rows: number = that many equal fr
+ * tracks (repeat(N, 1fr) via the grid-track-size envelope), string = custom CSS track list
+ * ('240px 1fr'). Defaults: cols 3, rows 'auto', gap 20 both axes, mobile 1 column (override via
+ * mobile={{gridCols:…}}). Children take span/rowSpan. */
+interface GridProps extends ContainerProps { cols?: number | string; rows?: number | string }
 /** h1..h4|heading|text|p — text intrinsics; children serialize via textOf (html-v3). */
 interface TextIntrinsicProps extends IntrinsicProps, WithChildren {}
 /** <html raw="…"> — raw HTML widget; raw wins over children when both are given. */
@@ -213,6 +224,7 @@ declare global {
       row: ContainerProps;
       col: ContainerProps;
       section: ContainerProps;
+      grid: GridProps;
       h1: TextIntrinsicProps;
       h2: TextIntrinsicProps;
       h3: TextIntrinsicProps;

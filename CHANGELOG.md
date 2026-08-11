@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+100% atomic-element coverage against Elementor 4.2.x:
+- **Native `e-grid`**: new `<grid cols rows>` intrinsic + `nativeGrid()` kit helper + `TRACKS`
+  (grid-track-size: fr count / custom list) and `GAPXY` (two-axis layout-direction gap) envelopes.
+  Every base-style leak (display, 3fr/2fr tracks, 20px gap, 10px padding, mobile 1-column) is
+  re-emitted explicitly. Elementor ≥ 4.2 only — the 4.1.x validator has neither the element nor
+  the prop type; `gridCols` on a box remains the portable path.
+- **tw grid subset**: `grid-rows-N`, `row-span-N`, and `gap-x-*`/`gap-y-*` now compile to ATOMIC
+  envelopes (two-axis gap; previously raw CSS). New sx keys: `gapX gapY gridRows rowSpan` (+ CSS
+  aliases columnGap/rowGap/gridTemplateRows).
+- **Native form feedback**: `form()` auto-appends `e-form-success-message` / `e-form-error-message`
+  (they are plain saved children — live-probed that the server does NOT auto-create them, so
+  omitting them meant zero submit feedback). `formSuccessMessage()/formErrorMessage()` for custom
+  copy/placement, `messages:false` to opt out. `checkboxRow()` mirrors the native checkbox row
+  (`e-form-checkbox-row` is a CLASS on an e-flexbox, not an element type).
+- decompile: `e-grid` → `<grid>` (fr/custom tracks, two-axis gap, mobile track overrides — bare
+  variant track lists used to be dropped), `grid-row`/'span N' string inversion; form messages
+  round-trip verbatim via `<Raw>`. lint: grid-track-size/span envelope validation; e-grid joins
+  the container rules.
+
 ## 1.2.0 — 2026-08-05
 
 New styling capability + footgun fixes (from field runs):

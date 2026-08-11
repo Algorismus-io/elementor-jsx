@@ -3,8 +3,9 @@
  * → readable elementor-jsx source. Works on ANY atomic tree, not just ones this framework built.
  *
  * Strategy for FAITHFUL round-trip (decompile → build → equivalent tree):
- *   - Structure: e-flexbox→<box>/<row>, e-heading→<heading>, e-paragraph→<text>, e-image→<img>,
- *     html→<html raw>, e-button→<Button>, unknown widget→<Raw> (verbatim kit-node passthrough).
+ *   - Structure: e-flexbox→<box>/<row>, e-grid→<grid cols rows>, e-heading→<heading>,
+ *     e-paragraph→<text>, e-image→<img>, html→<html raw>, e-button→<Button>, unknown
+ *     widget/element (e-form family incl. its success/error messages…)→<Raw> (verbatim passthrough).
  *   - Styling: each node's local style props are inverted to the `sx` shorthand where a clean shorthand
  *     exists; everything else (variable refs, rare props) is emitted verbatim inside `props={{…}}`,
  *     which sx() spreads unchanged. So no styling is ever lost — pretty where possible, exact always.
@@ -62,7 +63,7 @@ function invertProp(prop, val) {
       return { key: 'm', val: dimsToVal(val.value) };
     }
     case 'border-radius': return (t === 'size' && val.value?.size != null) ? { key: 'radius', val: sizeToVal(val.value) } : null;
-    case 'gap': { const c = SIZE(val) && cleanSize(val.value); return c ? { key: 'gap', val: c } : null; }
+    case 'gap': { const c = SIZE(val) && cleanSize(val.value); return c ? { key: 'gap', val: c } : null; } // layout-direction handled in invertProps (two keys)
     case 'width': { const c = SIZE(val) && cleanSize(val.value); return c ? { key: 'w', val: c } : null; }   // hug/fit-content → passthrough
     case 'max-width': { const c = SIZE(val) && cleanSize(val.value); return c ? { key: 'maxw', val: c } : null; }
     case 'min-height': { const c = SIZE(val) && cleanSize(val.value); return c ? { key: 'minh', val: c } : null; }
@@ -78,7 +79,15 @@ function invertProp(prop, val) {
     case 'text-align': return { key: 'ta', val: q({ start: 'left', end: 'right' }[val.value] || val.value) };
     case 'line-height': { if (!SIZE(val) || typeof val.value?.size !== 'number') return null; return { key: 'lh', val: val.value.unit === 'em' ? String(val.value.size) : (cleanSize(val.value) || null) }; }
     case 'letter-spacing': return (SIZE(val) && typeof val.value?.size === 'number') ? { key: 'ls', val: String(val.value.size) } : null;
-    case 'grid-column': return t === 'span' ? { key: 'span', val: String(val.value) } : null;
+    // span envelopes hold a NUMBER on 4.1.x-authored trees and 'span N' STRINGS on 4.2+ ones
+    // (deploy adapts per target) — invert both; full-track strings ('1 / -1') → passthrough.
+    case 'grid-column': case 'grid-row': {
+      if (t !== 'span') return null;
+      const key = prop === 'grid-column' ? 'span' : 'rowSpan';
+      if (typeof val.value === 'number') return { key, val: String(val.value) };
+      const m = /^span\s+(\d+)$/.exec(String(val.value));
+      return m ? { key, val: m[1] } : null;
+    }
     case 'position': return { key: 'pos', val: q(val.value) };
     case 'object-fit': return { key: 'fit', val: q(val.value) };
     case 'display': return { key: 'display', val: q(val.value) };
@@ -86,22 +95,50 @@ function invertProp(prop, val) {
   }
 }
 
+/* one grid-template value → source literal: string envelopes ('repeat(3, 1fr)' → 3, else quoted)
+ * AND native grid-track-size envelopes (fr N → N, custom → quoted string); null = passthrough. */
+function trackVal(v) {
+  if (v?.$$type === 'grid-track-size') {
+    const { unit, size } = v.value || {};
+    if (unit === 'fr' && typeof size === 'number') return String(size);
+    if (unit === 'custom') return q(String(size));
+    return null;
+  }
+  if (typeof v?.value !== 'string') return null;
+  const m = /^repeat\((\d+),\s*1fr\)$/.exec(v.value);
+  return m ? m[1] : q(v.value);
+}
+
 /* invert a full props object → { sx: {k:src}, passthrough: {atomicProp: node} } */
 function invertProps(props = {}) {
-  const sx = {}; const pass = {}; let gridCols = null, gtc = null;
+  const sx = {}; const pass = {}; let isGrid = false, gtc = null, gtr = null;
   for (const [k, v] of Object.entries(props)) {
     if (k === '_t' || k === '_m' || k === 'custom_css') continue;   // handled by caller
     if (k === 'display' && v?.value === 'flex') continue;           // box default — noise
     if (k === 'flex-direction' && v?.value === 'column') continue;  // box default — noise
-    if (k === 'display' && v?.value === 'grid') { gridCols = true; continue; }
-    if (k === 'grid-template-columns') { gtc = v?.value; continue; }
+    if (k === 'display' && v?.value === 'grid') { isGrid = true; continue; }
+    if (k === 'grid-template-columns') { gtc = v; continue; }
+    if (k === 'grid-template-rows') { gtr = v; continue; }
+    // two-axis layout-direction gap → gap (equal axes) or gapX/gapY — two sx keys, so handled here
+    if (k === 'gap' && v?.$$type === 'layout-direction') {
+      const cs = v.value?.column ? cleanSize(v.value.column.value) : undefined;
+      const rs = v.value?.row ? cleanSize(v.value.row.value) : undefined;
+      if ((v.value?.column && cs == null) || (v.value?.row && rs == null)) { pass[k] = v; continue; }
+      if (cs != null && rs != null && cs === rs) sx.gap = cs;
+      else { if (cs != null) sx.gapX = cs; if (rs != null) sx.gapY = rs; }
+      continue;
+    }
     const inv = invertProp(k, v);
     if (inv) sx[inv.key] = inv.val; else pass[k] = v;   // unknown / var → verbatim passthrough
   }
-  if (gridCols && gtc != null) {
-    const m = /^repeat\((\d+),\s*1fr\)$/.exec(gtc);
-    sx.gridCols = m ? m[1] : q(gtc);
-  } else if (gridCols) sx.display = q('grid');
+  // tracks invert even WITHOUT display:grid in the same variant (mobile overrides carry only the
+  // track list — they used to be silently dropped); gridCols/gridRows re-imply display:grid in sx.
+  for (const [key, v, prop] of [['gridCols', gtc, 'grid-template-columns'], ['gridRows', gtr, 'grid-template-rows']]) {
+    if (v == null) continue;
+    const t = trackVal(v);
+    if (t != null) sx[key] = t; else pass[prop] = v;
+  }
+  if (isGrid && gtc == null && gtr == null) sx.display = q('grid');
   return { sx, pass };
 }
 
@@ -129,6 +166,17 @@ function emitNode(n, ind, ctx) {
       if (!target) { sxSrc = inv.sx; pass = inv.pass; if (raw) rawCss = raw; }
       else bp[target] = { ...inv.sx, ...(raw ? { __raw: raw } : {}) };
     }
+  }
+
+  // native e-grid → <grid cols rows>: remap the inverted track keys to the intrinsic's props,
+  // drop what the intrinsic re-emits (display:grid; rows 'auto' is its default), and bake the
+  // base 10px padding explicitly when the source carried none (preserves the native render —
+  // recompiled containers always set padding, per the kit's explicitness rule).
+  if (n.elType === 'e-grid') {
+    if (sxSrc.gridCols != null) { sxSrc.cols = sxSrc.gridCols; delete sxSrc.gridCols; }
+    if (sxSrc.gridRows != null) { if (sxSrc.gridRows !== q('auto')) sxSrc.rows = sxSrc.gridRows; delete sxSrc.gridRows; }
+    delete sxSrc.display;
+    if (sxSrc.pad == null && !('padding' in pass)) sxSrc.pad = '10';
   }
 
   const attrs = [];
@@ -172,15 +220,17 @@ function emitNode(n, ind, ctx) {
   // syntax but INVALID JS when the node sits at the top-level array (caught by the test suite).
   if (w) return `${pad}<Raw>{${JSON.stringify(n)} /* widget:${w} */}</Raw>`;
 
-  // container (e-flexbox / e-div-block). OTHER container elTypes (e-form, e-tabs family,
-  // e-collection-loop…) round-trip as <Raw> — the old code emitted them as <box>, silently
-  // DROPPING the elType + settings (a form decompiled into a plain div; data loss).
-  if (e && e !== 'e-flexbox' && e !== 'e-div-block') {
+  // container (e-flexbox / e-div-block / e-grid). OTHER container elTypes (e-form + its
+  // e-form-success-message/e-form-error-message children, e-tabs family, e-collection-loop…)
+  // round-trip as <Raw> — the old code emitted them as <box>, silently DROPPING the elType +
+  // settings (a form decompiled into a plain div; data loss).
+  if (e && e !== 'e-flexbox' && e !== 'e-div-block' && e !== 'e-grid') {
     return `${pad}<Raw>{${JSON.stringify(n)} /* element:${e} */}</Raw>`;
   }
   const isRow = sxSrc.dir === '"row"';
-  const Tag = tag === 'section' ? 'section' : 'box';
-  const tagAttr = (tag && tag !== 'div' && tag !== 'section') ? `tag=${q(tag)}` : '';
+  const Tag = e === 'e-grid' ? 'grid' : tag === 'section' ? 'section' : 'box';
+  // <grid> keeps ANY non-div tag as an attr (there's no <section>-style grid alias to absorb it)
+  const tagAttr = (tag && tag !== 'div' && (Tag === 'grid' || tag !== 'section')) ? `tag=${q(tag)}` : '';
   const kids = (n.elements || []).map((c) => emitNode(c, ind + 1, ctx)).join('\n');
   if (!kids) return `${pad}<${Tag} ${A(tagAttr)} />`;
   return `${pad}<${Tag} ${A(tagAttr)}>\n${kids}\n${pad}</${Tag}>`;

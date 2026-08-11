@@ -195,3 +195,35 @@ test('decompile: e-button → <Button>, unknown widget → <Raw> passthrough sur
   const nav = out.find((n) => n.widgetType === 'nav-menu');
   assert.deepEqual(nav.settings, { menu: 'main', layout: 'dropdown' }, 'Raw passthrough byte-faithful');
 });
+
+test('decompile: e-form status-message children (e-form-success/error-message) → <Raw>, byte-faithful rebuild', () => {
+  const msg = (type, text) => ({ id: `m-${type}`, elType: `e-form-${type}-message`, settings: { classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [
+    { id: `mp-${type}`, elType: 'widget', widgetType: 'e-paragraph', settings: { paragraph: { $$type: 'html-v3', value: { content: { $$type: 'string', value: text }, children: [] } }, classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [] },
+  ] });
+  const tree = [{ id: 'f1', elType: 'e-form', settings: { 'form-name': { $$type: 'string', value: 'c' }, classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [
+    msg('success', 'Sent!'), msg('error', 'Retry'),
+  ] }];
+  const src = decompile(tree, { name: 'FormMsgs', slug: 'formmsgs' });
+  assert.match(src, /"elType":"e-form-success-message"/, 'success message preserved verbatim (inside the form Raw)');
+  const bundle = rebuild(tree, 'FormMsgs');
+  const out = allNodes(bundle.pages[0].elements);
+  const s = out.find((n) => n.elType === 'e-form-success-message');
+  const e = out.find((n) => n.elType === 'e-form-error-message');
+  assert.ok(s && e, 'both message elements survive');
+  assert.equal(textOf(s.elements[0]), 'Sent!');
+  assert.equal(textOf(e.elements[0]), 'Retry');
+});
+
+test('decompile: native e-grid rebuilds through the real cli (grid → <grid> → e-grid)', async () => {
+  const { nativeGrid, col, para, P0 } = await import('../../src/kit/kit.mjs');
+  const tree = [nativeGrid({ cols: 3, rows: 2, gap: [16, 32] }, [col({ padding: P0 }, [para('cell')])])];
+  const bundle = rebuild(JSON.parse(JSON.stringify(tree)), 'GridRT');
+  const out = allNodes(bundle.pages[0].elements).find((n) => n.elType === 'e-grid');
+  assert.ok(out, 'e-grid survives the round-trip');
+  // post-dedup, local styles live in the shared class registry — resolve through the ref
+  const ref = (out.settings.classes?.value || []).find((c) => bundle.classes.items[c]);
+  const p = bundle.classes.items[ref].variants.find((v) => v.meta.breakpoint === 'desktop').props;
+  assert.deepEqual(p['grid-template-columns'], { $$type: 'grid-track-size', value: { unit: 'fr', size: 3 } });
+  assert.deepEqual(p['grid-template-rows'], { $$type: 'grid-track-size', value: { unit: 'fr', size: 2 } });
+  assert.deepEqual(p.gap, { $$type: 'layout-direction', value: { column: { $$type: 'size', value: { unit: 'px', size: 16 } }, row: { $$type: 'size', value: { unit: 'px', size: 32 } } } });
+});
