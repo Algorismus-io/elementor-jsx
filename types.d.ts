@@ -107,7 +107,9 @@ export interface IntrinsicProps extends SxProps {
    * grammar-validated; `class`/`id`/`style`/`on*` are hard-blocked at build (use cls/gcls, id,
    * sx/raw instead — on* is never allowed). Stored & editor-validated on Elementor 4.2.1; DOM
    * emission depends on Elementor enabling its transformer — verified per-version by the
-   * certification suite. Until then the runtime-carrier + `_cssid` remain the JS-hook path. */
+   * certification suite. Empirically: FREE core's transformer is stubbed (no DOM emission), while
+   * Pro >= 4.1 registers its own and DOES emit (live-verified 4.2.1 + Pro 4.1.0). On free installs
+   * the runtime-carrier + `_cssid` remain the JS-hook path. */
   attrs?: Record<string, string>;
   /** Native state variants (split by expressibility; see StateSx). tw prefixes hover:/focus:/
    * active:/focus-visible:/checked: land here when fully schema-mappable. */

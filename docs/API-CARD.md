@@ -67,8 +67,11 @@ Special props on all intrinsics: `tw=""` (Tailwind subset), `raw=""` (CSS decls,
 grammar-validated at build; `class`/`id`/`style`/`on*` are HARD-BLOCKED (use `cls`/`gcls`, `id`,
 sx/`raw` instead — `on*` never). **Version gate**: stored & editor-validated on Elementor 4.2.1;
 DOM emission depends on Elementor enabling its transformer — verified per-version by the
-certification suite. Until it flips, the runtime-carrier html widget + `_cssid` remain the
-JS-hook path of record.
+certification suite. Empirical status: FREE core's transformer is stubbed (no DOM emission);
+**Elementor Pro ≥ 4.1 registers its own transformer** (license feature `atomic-custom-attributes`)
+and attributes DO reach the front-end DOM there (live-verified 4.2.1 + Pro 4.1.0, 2026-08-12;
+values are esc_attr'd at save). On free installs the runtime-carrier html widget + `_cssid`
+remain the JS-hook path of record.
 
 ## sx style props (on any intrinsic / box())
 

@@ -199,9 +199,11 @@ export const CUSTOM_CSS = (declarations) => ({
 /* ── attributes (settings-level HTML attributes; storage verified on 4.2.1) ──
  * Envelope: {$$type:'attributes', value:[key-value…]} — declared on effectively every atomic
  * element schema. NOTE the honest contract: attributes are STORED & editor-validated on Elementor
- * 4.2.1, but the DOM transformer is STUBBED there (PHP returns null) — DOM emission depends on
- * Elementor enabling its transformer, verified per-version by the certification suite. Until then
- * the runtime-carrier html widget + `_cssid` remain the JS-hook path of record. */
+ * 4.2.1, but FREE core's DOM transformer is STUBBED there (PHP returns null) — no front-end
+ * emission. Elementor Pro >= 4.1 registers its own transformer (license feature
+ * `atomic-custom-attributes`) and DOES emit them (live-verified 4.2.1 + Pro 4.1.0; core esc_attr's
+ * key+value at save). Verified per-version by the certification suite; on free installs the
+ * runtime-carrier html widget + `_cssid` remain the JS-hook path of record. */
 const ATTR_NAME_RE = /^[a-zA-Z][a-zA-Z0-9:._-]*$/;
 const ATTR_BLOCKED = {
   class: 'Elementor owns the class attribute (settings.classes) — use cls=/gcls= (or bindClass) instead',

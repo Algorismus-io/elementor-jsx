@@ -244,15 +244,26 @@ test('1.7.x certification: native state variants + per-state custom_css render; 
   assert.match(cssFlat, /:active[^{]*\{[^}]*letter-spacing:2px/i, 'per-state custom_css renders inside the state selector');
 
   // (c) attributes: storage is version-dependent (schema key ships 4.2.x); DOM emission is the
-  // VERSION-FLIP DETECTOR — the transformer is stubbed through 4.2.1 (returns null), so the
-  // attribute must NOT reach the DOM. The day this assertion fails, Elementor enabled it:
-  // flip docs/API-CARD.md + types.d.ts wording from "stored, not emitted" to "emitted".
+  // VERSION-FLIP DETECTOR. Empirical matrix (live-verified 2026-08-12 on 4.2.1 + Pro 4.1.0):
+  //   FREE core — transformer stubbed (returns null) → stored but NOT emitted;
+  //   PRO >= 4.1 — Pro_Attributes_Transformer (license `atomic-custom-attributes`) → EMITTED.
+  // The day the free-core assertion fails, Elementor un-stubbed it: flip docs/API-CARD.md +
+  // types.d.ts wording from "stored, not emitted on free" to "emitted".
+  const caps = await (await fetch(`${WP_URL}/wp-json/elementor-ultra/v1/site/capabilities`,
+    { headers: { Authorization: 'Basic ' + Buffer.from(`${process.env.WP_USER}:${process.env.WP_APP_PASSWORD}`).toString('base64') } })).json().catch(() => ({}));
+  const proActive = !!(caps?.data?.pro_active);
   if (stored) {
     assert.equal(stored.$$type, 'attributes', 'attributes envelope persisted');
     assert.equal(stored.value?.[0]?.value?.key?.value, 'data-exjsx-probe');
-    assert.ok(!/data-exjsx-probe/.test(html),
-      'ATTRIBUTES NOW REACH THE DOM — Elementor un-stubbed its attributes transformer on this version. ' +
-      'Update the version-gated language in docs/API-CARD.md + types.d.ts (attrs), then extend this probe to assert emission.');
+    if (proActive) {
+      assert.ok(/data-exjsx-probe="attrs17x"/.test(html),
+        'Pro is active but attributes did NOT reach the DOM — Pro pulled/regated its Pro_Attributes_Transformer; re-verify the API-card Pro claim.');
+    } else {
+      assert.ok(!/data-exjsx-probe/.test(html),
+        'ATTRIBUTES NOW REACH THE DOM ON FREE CORE — Elementor un-stubbed its attributes transformer on this version. ' +
+        'Update the version-gated language in docs/API-CARD.md + types.d.ts (attrs), then extend this probe to assert emission.');
+    }
+    t.diagnostic(`attributes DOM emission on this stack (pro_active=${proActive}): ${/data-exjsx-probe/.test(html) ? 'EMITTED' : 'not emitted'}`);
   } else {
     t.diagnostic('attributes envelope was stripped on save — this Elementor version has no attributes schema key (pre-4.2.x); storage contract starts at 4.2.x');
     assert.ok(!/data-exjsx-probe/.test(html), 'no DOM emission either way');
