@@ -21,17 +21,54 @@ export interface Envelope { $$type: string; value: unknown }
 /** Dynamic-tag envelope (Pro): text props take it directly; image/link nest it. */
 export interface DynEnvelope extends Envelope { $$type: 'dynamic' }
 
-/** Motion interaction options (free core: load/scrollIn + fade/slide/scale). */
-export interface AnimateOptions {
+/** One custom-effect keyframe (effect: 'custom' only — pro: renders only with Pro's handler).
+ * `stop` is the 0-100 timeline percent; settings mirror the editor's plain forms: opacity ≤ 1 is
+ * a fraction (×100), axes default to the identity (scale 1, move/rotate/skew 0). */
+export interface MotionKeyframe {
+  stop: number;
+  opacity?: number;
+  move?: { x?: number; y?: number; z?: number };    // px
+  rotate?: { x?: number; y?: number; z?: number };  // deg
+  scale?: { x?: number; y?: number; z?: number };   // factor
+  skew?: { x?: number; y?: number };                // deg
+}
+
+/** Motion interaction options (`motion` prop / kit `interaction()`).
+ * FREE core animates trigger load|scrollIn with effect fade|slide|scale ONLY. Everything tagged
+ * `pro:` below SAVES everywhere but animates only with Elementor Pro's handler — and `scrollOut`
+ * additionally THROWS at trigger time on free 4.2.1 (out-of-scope var bug): never rely on it
+ * without Pro. `exjsx lint` warns on every pro-flagged field in a bundle. */
+export interface MotionSpec {
+  /** default 'scrollIn'. pro: scrollOut (also free-4.2.1 crash bug) / scrollOn / hover / click. */
   trigger?: 'load' | 'scrollIn' | 'scrollOut' | 'scrollOn' | 'hover' | 'click';
+  /** default 'fade'. pro: 'custom' (requires `keyframes`). */
   effect?: 'fade' | 'slide' | 'scale' | 'custom';
   type?: 'in' | 'out';
   direction?: '' | 'left' | 'right' | 'top' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
-  duration?: number;   // ms
-  delay?: number;      // ms
+  duration?: number;   // ms, default 600
+  delay?: number;      // ms, default 0
+  /** exclude on these breakpoints → the interaction-breakpoints envelope. */
+  excludeOn?: ('mobile' | 'mobile_extra' | 'tablet' | 'tablet_extra' | 'laptop' | 'desktop' | 'widescreen')[];
+  /** pro: free handler hardcodes defaultEasing ('easeIn'). */
   easing?: 'easeIn' | 'easeOut' | 'easeInOut' | 'backIn' | 'backInOut' | 'backOut' | 'linear';
+  /** pro: free handler hardcodes replay: false. */
   replay?: boolean;
+  /** pro: container scope for scroll-based interactions (default 'viewport'). */
+  relativeTo?: string;
+  /** pro: repeat mode ('' none, 'loop', 'times' with `times`). */
+  repeat?: '' | 'loop' | 'times';
+  /** pro: play count when repeat === 'times' (≥ 1). */
+  times?: number;
+  /** pro: scrollOn viewport start percent (0-100). */
+  start?: number;
+  /** pro: scrollOn viewport end percent (0-100). */
+  end?: number;
+  /** pro: custom-effect keyframes (effect: 'custom' only; non-empty). */
+  keyframes?: MotionKeyframe[];
 }
+
+/** @deprecated pre-1.8 name — use MotionSpec. */
+export type AnimateOptions = MotionSpec;
 
 /** The sx shorthand — every key maps to a verified atomic envelope (see unit/sx.test.mjs).
  * Standard CSS property names (kebab or camelCase: `padding`, `maxWidth`, `textAlign`, …) are
@@ -102,7 +139,13 @@ export interface IntrinsicProps extends SxProps {
   cls?: string;                       // semantic class-label hint for dedup naming
   gcls?: string;                      // external global-class refs (space-separated)
   dyn?: DynEnvelope;                  // dynamic-tag content binding (children ignored)
-  animate?: AnimateOptions | AnimateOptions[] | unknown[];
+  /** Native motion interactions: one MotionSpec or an array (≤ 5 per element — build error above;
+   * the server would throw the WHOLE save). Pre-built interaction-item envelopes pass through
+   * verbatim (the decompile round-trip path). Not valid on <html> (classic widget — no
+   * data-interaction-id). Delivery: footer JSON `#elementor-interactions-data` + Motion lib. */
+  motion?: MotionSpec | MotionSpec[] | unknown[];
+  /** @deprecated pre-1.8 alias of `motion` (same behavior; passing both throws). */
+  animate?: MotionSpec | MotionSpec[] | unknown[];
   /** HTML attributes (data-*, aria-*, rel, …) → the settings.attributes envelope. Names are
    * grammar-validated; `class`/`id`/`style`/`on*` are hard-blocked at build (use cls/gcls, id,
    * sx/raw instead — on* is never allowed). Stored & editor-validated on Elementor 4.2.1; DOM
@@ -177,6 +220,12 @@ export interface SiteDef {
   pages?: PageDef[];
   /** site-wide theme parts (Pro theme-builder documents). */
   parts?: { header?: PartDef; footer?: PartDef; single?: PartDef; popup?: PartDef; archive?: PartDef; error404?: PartDef } | null;
+  /** Motion behavior. respectReducedMotion (DEFAULT TRUE — native Elementor does NOT honor
+   * prefers-reduced-motion; this is our a11y value-add): every compiled tree that carries
+   * interactions gets a tiny inline guard that neutralizes the footer interactions JSON when
+   * `matchMedia('(prefers-reduced-motion: reduce)')` matches. Set false to opt out.
+   * fs-projects: set in site.config.mjs → `motion: { respectReducedMotion: false }`. */
+  motion?: { respectReducedMotion?: boolean };
 }
 
 export function defineSite(def: SiteDef): { $$site: true } & SiteDef;

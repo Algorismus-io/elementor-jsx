@@ -74,6 +74,15 @@ the renderer appends a literal `\n`, so an unterminated final declaration dies i
 parser. `css()` guards both at build; decompiled/imported foreign blobs are re-guarded by lint.
 [`custom-css-sanitize`]
 
+Motion (`motion={{…}}`) is the same doctrine at the interactions layer: the server SILENTLY
+STRIPS any invalid interaction item on save (zero errors, the animation just never runs), so the
+lint mirror of `validation.php` is the only honest failure surface — trust the lint, not the
+save. Pro-flagged fields (hover/click/scrollOn/custom/easing/replay/…) save everywhere but
+animate only with Pro, and `scrollOut` crashes the FREE 4.2.1 handler at trigger time — a
+free-target bundle should ship none of them. Reduced motion is respected by default (compiler
+guard — native Elementor ignores it); opt out only with a reason.
+[`invalid-interaction`, `pro-interaction`]
+
 ## 3. Theme discipline
 
 - Brand colors, fonts, radii, spacing live in `defineTheme` — components read `t.color.primary`,

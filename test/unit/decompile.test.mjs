@@ -155,15 +155,36 @@ test('decompile: DYNAMIC content round-trips via dyn={…} (used to flatten to e
   assert.deepEqual(out.settings.title, DYN, 'dynamic envelope byte-identical after round-trip');
 });
 
-test('decompile: INTERACTIONS round-trip via animate={…} (used to be silently dropped)', () => {
-  const item = { $$type: 'interaction-item', value: { interaction_id: { $$type: 'string', value: 'ix9' }, trigger: { $$type: 'string', value: 'load' }, animation: { $$type: 'animation-preset-props', value: { effect: { $$type: 'string', value: 'fade' }, type: { $$type: 'string', value: 'in' }, direction: { $$type: 'string', value: '' }, timing_config: { $$type: 'timing-config', value: { duration: { $$type: 'size', value: { unit: 'ms', size: 600 } }, delay: { $$type: 'size', value: { unit: 'ms', size: 0 } } } } } } } };
+test('decompile: INTERACTIONS invert to the friendly motion={…} opts (defaults omitted) and round-trip', () => {
+  const item = { $$type: 'interaction-item', value: { interaction_id: { $$type: 'string', value: 'ix9' }, trigger: { $$type: 'string', value: 'load' }, animation: { $$type: 'animation-preset-props', value: { effect: { $$type: 'string', value: 'fade' }, type: { $$type: 'string', value: 'in' }, direction: { $$type: 'string', value: '' }, timing_config: { $$type: 'timing-config', value: { duration: { $$type: 'size', value: { unit: 'ms', size: 600 } }, delay: { $$type: 'size', value: { unit: 'ms', size: 250 } } } } } } } };
   const tree = [{ id: 'x1', elType: 'widget', widgetType: 'e-heading', settings: { tag: { $$type: 'string', value: 'h2' }, title: { $$type: 'html-v3', value: { content: { $$type: 'string', value: 'Animated' }, children: [] } }, classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [], interactions: { version: 1, items: [item] } }];
   const src = decompile(tree, { name: 'Ix', slug: 'ix' });
-  assert.match(src, /animate=\{\[\{"\$\$type":"interaction-item"/, 'animate attr emitted');
+  assert.match(src, /motion=\{\{ trigger: "load", delay: 250 \}\}/, 'friendly opts, non-defaults only');
   const bundle = rebuild(tree, 'IxRT');
   const out = allNodes(bundle.pages[0].elements).find((n) => n.widgetType === 'e-heading');
   assert.equal(out.interactions.items.length, 1);
-  assert.deepEqual(out.interactions.items[0], item, 'interaction envelope byte-identical');
+  // envelope-equivalent modulo interaction_id (re-minted ix-N on rebuild; server treats it as opaque)
+  const rebuilt = structuredClone(out.interactions.items[0]);
+  assert.match(rebuilt.value.interaction_id.value, /^ix-/);
+  rebuilt.value.interaction_id = item.value.interaction_id;
+  assert.deepEqual(rebuilt, item, 'interaction envelope equivalent after round-trip');
+});
+
+test('decompile: SAVED-shape interactions (JSON string, the validation.php re-encode) still invert', () => {
+  const tree = [{ id: 'x2', elType: 'e-flexbox', settings: { classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [],
+    interactions: JSON.stringify({ items: [{ $$type: 'interaction-item', value: { trigger: { $$type: 'string', value: 'scrollIn' }, animation: { $$type: 'animation-preset-props', value: { effect: { $$type: 'string', value: 'slide' }, type: { $$type: 'string', value: 'in' }, direction: { $$type: 'string', value: 'top' }, timing_config: { $$type: 'timing-config', value: { duration: { $$type: 'size', value: { unit: 'ms', size: 400 } }, delay: { $$type: 'size', value: { unit: 'ms', size: 0 } } } } } }, breakpoints: { $$type: 'interaction-breakpoints', value: { excluded: { $$type: 'excluded-breakpoints', value: [{ $$type: 'string', value: 'mobile' }] } } } } }], version: 1 }) }];
+  const src = decompile(tree, { name: 'IxS', slug: 'ixs' });
+  assert.match(src, /motion=\{\{ effect: "slide", direction: "top", duration: 400, excludeOn: \["mobile"\] \}\}/, 'saved JSON string decoded; excludeOn inverted');
+});
+
+test('decompile: custom-effect / alien-key interactions fall back to the VERBATIM envelope (zero loss)', () => {
+  const custom = { $$type: 'interaction-item', value: { trigger: { $$type: 'string', value: 'scrollIn' }, animation: { $$type: 'animation-preset-props', value: { effect: { $$type: 'string', value: 'custom' }, type: { $$type: 'string', value: 'in' }, direction: { $$type: 'string', value: '' }, timing_config: { $$type: 'timing-config', value: { duration: { $$type: 'size', value: { unit: 'ms', size: 600 } }, delay: { $$type: 'size', value: { unit: 'ms', size: 0 } } } }, custom_effect: { $$type: 'custom-effect', value: { keyframes: { $$type: 'keyframes', value: [{ $$type: 'keyframe-stop', value: { stop: { $$type: 'size', value: { unit: '%', size: 0 } }, settings: { $$type: 'keyframe-stop-settings', value: { opacity: { $$type: 'size', value: { unit: '%', size: 0 } } } } } }] } } } } } } };
+  const tree = [{ id: 'x3', elType: 'widget', widgetType: 'e-heading', settings: { tag: { $$type: 'string', value: 'h2' }, title: { $$type: 'html-v3', value: { content: { $$type: 'string', value: 'C' }, children: [] } }, classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [], interactions: { version: 1, items: [custom] } }];
+  const src = decompile(tree, { name: 'IxC', slug: 'ixc' });
+  assert.match(src, /motion=\{\{"\$\$type":"interaction-item"/, 'verbatim envelope passthrough');
+  const bundle = rebuild(tree, 'IxCRT');
+  const out = allNodes(bundle.pages[0].elements).find((n) => n.widgetType === 'e-heading');
+  assert.deepEqual(out.interactions.items[0], custom, 'custom-effect envelope byte-identical');
 });
 
 test('decompile: NON-FLEXBOX container elTypes (e-form/e-tabs) → <Raw>, not a lossy <box>', () => {

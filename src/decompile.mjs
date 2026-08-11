@@ -147,6 +147,63 @@ function invertProps(props = {}) {
   return { sx, pass };
 }
 
+/* ── interactions inversion (SPEC 1.8) ── */
+/* decode a node's `interactions` key → items array. Saved trees carry it as a JSON STRING
+ * (validation.php re-encodes on save); authored trees as {version, items}. */
+function interactionItemsOf(interactions) {
+  let v = interactions;
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return []; } }
+  if (!v || typeof v !== 'object') return [];
+  const items = v.items?.$$type === 'array' ? v.items.value : v.items;
+  return Array.isArray(items) ? items : [];
+}
+/* invert ONE interaction-item envelope → friendly motion-opts source (`{ trigger: 'load', … }`,
+ * defaults omitted), or null when any field has no opts spelling (custom keyframes, alien keys)
+ * → caller falls back to the verbatim envelope. */
+function invertMotionItem(item) {
+  if (item?.$$type !== 'interaction-item' || !item.value) return null;
+  const v = item.value;
+  if (Object.keys(v).some((k) => !['interaction_id', 'trigger', 'animation', 'breakpoints'].includes(k))) return null;
+  const a = v.animation;
+  if (a?.$$type !== 'animation-preset-props' || !a.value) return null;
+  const av = a.value;
+  if (Object.keys(av).some((k) => !['effect', 'type', 'direction', 'timing_config', 'config'].includes(k))) return null;   // custom_effect et al → verbatim
+  const sv = (e) => (e?.$$type === 'string' && typeof e.value === 'string' ? e.value : null);
+  const ms = (e) => (e?.$$type === 'size' && typeof e.value?.size === 'number' ? e.value.size
+    : e?.$$type === 'number' && typeof e.value === 'number' ? e.value : null);
+  const trigger = sv(v.trigger), effect = sv(av.effect), type = sv(av.type), direction = sv(av.direction);
+  const tc = av.timing_config?.$$type === 'timing-config' ? av.timing_config.value : null;
+  const duration = tc ? ms(tc.duration) : null, delay = tc ? ms(tc.delay) : null;
+  if (trigger == null || effect == null || type == null || direction == null || duration == null || delay == null) return null;
+  const o = [];
+  if (trigger !== 'scrollIn') o.push(`trigger: ${q(trigger)}`);
+  if (effect !== 'fade') o.push(`effect: ${q(effect)}`);
+  if (type !== 'in') o.push(`type: ${q(type)}`);
+  if (direction !== '') o.push(`direction: ${q(direction)}`);
+  if (duration !== 600) o.push(`duration: ${duration}`);
+  if (delay !== 0) o.push(`delay: ${delay}`);
+  const cv = av.config?.value;
+  if (av.config !== undefined) {
+    if (av.config?.$$type !== 'config-v2' && av.config?.$$type !== 'animation-config') return null;   // animation-config = pre-1.8 emissions
+    if (!cv || typeof cv !== 'object') return null;
+    for (const [k, e] of Object.entries(cv)) {
+      if (['easing', 'relativeTo', 'repeat'].includes(k)) { const s = sv(e); if (s == null) return null; o.push(`${k}: ${q(s)}`); }
+      else if (k === 'replay') { if (e?.$$type !== 'boolean' || typeof e.value !== 'boolean') return null; o.push(`replay: ${e.value}`); }
+      else if (k === 'times') { if (e?.$$type !== 'number' || typeof e.value !== 'number') return null; o.push(`times: ${e.value}`); }
+      else if (k === 'start' || k === 'end') { const n2 = ms(e); if (n2 == null) return null; o.push(`${k}: ${n2}`); }
+      else return null;
+    }
+  }
+  if (v.breakpoints !== undefined) {
+    const ex = v.breakpoints?.$$type === 'interaction-breakpoints' ? v.breakpoints.value?.excluded : null;
+    if (ex?.$$type !== 'excluded-breakpoints' || !Array.isArray(ex.value)) return null;
+    const bps = ex.value.map(sv);
+    if (bps.some((b) => b == null)) return null;
+    o.push(`excludeOn: [${bps.map(q).join(', ')}]`);
+  }
+  return `{ ${o.join(', ')} }`;
+}
+
 /* ── content extraction ── */
 const htmlV3 = (v) => (v?.$$type === 'html-v3' ? (v.value?.content?.value ?? '') : (v?.value ?? ''));
 const stringV = (v) => (v && typeof v === 'object' ? v.value : v);
@@ -222,10 +279,15 @@ function emitNode(n, ind, ctx) {
     const src = stateObjSrc(b);
     if (src !== '{  }') attrs.push(`${state}={${src}}`);
   }
-  // interactions round-trip: emit animate={[…interaction-item envelopes…]} — interact() passes
-  // pre-built envelopes through verbatim (they used to be silently DROPPED on decompile).
-  const ixItems = n.interactions?.items || (typeof n.interactions === 'string' ? (JSON.parse(n.interactions || '{}').items || []) : []);
-  if (ixItems.length) attrs.push(`animate={${JSON.stringify(ixItems)}}`);
+  // interactions round-trip: motion={…} — friendly opts where the envelope is fully invertible
+  // (rebuilds byte-equivalent through interaction(); interaction_id is dropped, re-minted ix-N —
+  // the server treats it as opaque), verbatim interaction-item envelopes otherwise (custom
+  // keyframes, alien keys — interact() passes $$type:'interaction-item' through untouched).
+  const ixItems = interactionItemsOf(n.interactions);
+  if (ixItems.length) {
+    const srcs = ixItems.map((it) => invertMotionItem(it) ?? JSON.stringify(it));
+    attrs.push(`motion={${srcs.length === 1 ? srcs[0] : `[${srcs.join(', ')}]`}}`);
+  }
   const link = s.link?.value?.href || s.link?.href || (s.link?.value?.destination);
   if (link) attrs.push(`href={${q(typeof link === 'object' ? (link.value || '') : link)}}`);
   for (const [k, val] of Object.entries(sxSrc)) attrs.push(k === 'center' ? 'center' : `${k}={${val}}`);

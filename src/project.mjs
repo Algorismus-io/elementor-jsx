@@ -3,7 +3,7 @@
  * "file router"). Separation of concerns is the contract:
  *
  *   mysite/
- *     site.config.mjs        (optional) { name?, template? } — project-level config ONLY
+ *     site.config.mjs        (optional) { name?, template?, motion? } — project-level config ONLY
  *     theme.mjs              (optional) default-exports a Theme (defineTheme) — tokens ONLY
  *     pages/
  *       home.page.jsx        default-exports a component; `export const meta = {…}` per-page config
@@ -150,7 +150,7 @@ export function synthesizeEntry(manifest) {
     });
   }
 
-  body.push(`export default defineSite({ name: __config.name ?? ${JSON.stringify(manifest.name)}, theme: __theme, pages: __pages${manifest.parts.length ? ', parts: __parts' : ''} });`);
+  body.push(`export default defineSite({ name: __config.name ?? ${JSON.stringify(manifest.name)}, theme: __theme, pages: __pages${manifest.parts.length ? ', parts: __parts' : ''}, motion: __config.motion });`);
   return [...imp, '', ...body].join('\n');
 }
 

@@ -213,3 +213,94 @@ test('lint: empty-container covers e-grid too', () => {
   b.pages[0].elements[0].elements = [];
   assert.equal(of(lintBundle(b), 'empty-container').length, 1);
 });
+
+/* ── interactions (SPEC 1.8): the server strips invalid items SILENTLY — lint is the only honest
+ * failure surface. Fixture per enum + shape rule, mirroring validation.php 4.2.1. ── */
+import { interaction } from '../../src/kit/kit.mjs';
+
+const ixBundle = (interactions) => ({
+  pages: [{ title: 'ix', slug: 'ix', seo, elements: [{ id: 'n1', elType: 'e-flexbox', settings: { classes: { $$type: 'classes', value: [] } }, styles: {}, elements: [], interactions }] }],
+  classes: { items: {}, order: [] },
+});
+const withItems = (...items) => ixBundle({ version: 1, items });
+/** one valid item, then surgically broken via mutate(value, animationValue). */
+const broken = (mutate) => {
+  const item = structuredClone(interaction({ trigger: 'load' }));
+  mutate(item.value, item.value.animation.value, item);
+  return withItems(item);
+};
+const errsOf = (b) => of(lintBundle(b), 'invalid-interaction');
+
+test('lint: invalid-interaction is SILENT on kit-built items and states the positive verification', () => {
+  const clean = lintBundle(withItems(interaction(), interaction({ trigger: 'load', excludeOn: ['mobile'] })));
+  assert.equal(of(clean, 'invalid-interaction').length, 0, formatLint(clean));
+  assert.ok(clean.verified.some((v) => /2 interaction item\(s\) validator-exact/.test(v)), 'positive assertion present');
+});
+
+test('lint: invalid-interaction — every enum fixture fires (trigger/effect/type/direction/repeat)', () => {
+  assert.match(errsOf(broken((v) => { v.trigger.value = 'blur'; }))[0].message, /trigger 'blur'.*load\|scrollIn/);
+  assert.match(errsOf(broken((v, a) => { a.effect.value = 'bounce'; }))[0].message, /effect 'bounce'.*fade\|slide\|scale\|custom/);
+  assert.match(errsOf(broken((v, a) => { a.type.value = 'inout'; }))[0].message, /type 'inout'.*in\|out/);
+  assert.match(errsOf(broken((v, a) => { a.direction.value = 'up'; }))[0].message, /direction 'up'/);
+  assert.match(errsOf(broken((v, a) => { a.config = { $$type: 'config-v2', value: { repeat: { $$type: 'string', value: 'forever' } } }; }))[0].message, /repeat 'forever'.*loop\|times/);
+  // every message carries the silent-strip warning — that's the point of the rule
+  for (const f of errsOf(broken((v) => { v.trigger.value = 'blur'; }))) assert.match(f.message, /strips this item SILENTLY/);
+});
+
+test('lint: invalid-interaction — envelope shapes (item wrapper, preset-props, timing, config, breakpoints)', () => {
+  assert.match(errsOf(withItems({ effect: 'fade' }))[0].message, /not an \{\$\$type:'interaction-item'/, 'bare opts object is NOT an envelope');
+  assert.match(errsOf(broken((v, a, item) => { v.animation.$$type = 'animation-preset'; }))[0].message, /must be 'animation-preset-props'/, 'the #1 silent-strip cause');
+  assert.match(errsOf(broken((v, a) => { a.timing_config.value.duration = { $$type: 'size', value: { unit: 'ms', size: -5 } }; }))[0].message, /duration/);
+  assert.match(errsOf(broken((v, a) => { delete a.timing_config.value.delay; }))[0].message, /delay/);
+  assert.match(errsOf(broken((v, a) => { a.config = { $$type: 'config-v2', value: { times: { $$type: 'number', value: 0 } } }; }))[0].message, /times.*≥ 1/);
+  assert.match(errsOf(broken((v, a) => { a.config = { $$type: 'config-v2', value: { start: { $$type: 'size', value: { unit: '%', size: 150 } } } }; }))[0].message, /start.*0-100/);
+  assert.match(errsOf(broken((v, a) => { a.config = { $$type: 'config-v2', value: { replay: { $$type: 'boolean', value: 'yes' } } }; }))[0].message, /replay is not a boolean/);
+  assert.match(errsOf(broken((v) => { v.breakpoints = { $$type: 'interaction-breakpoints', value: { excluded: ['mobile'] } }; }))[0].message, /breakpoints/, 'bare strings are not string envelopes');
+  assert.match(errsOf(broken((v) => { v.interaction_id = 'ix9'; }))[0].message, /interaction_id/, 'bare string id (must be an envelope)');
+});
+
+test('lint: invalid-interaction — custom-effect keyframe rules (non-empty, stop+settings, allowed keys)', () => {
+  const customize = (kfMutate) => broken((v, a) => {
+    a.effect.value = 'custom';
+    a.custom_effect = { $$type: 'custom-effect', value: { keyframes: { $$type: 'keyframes', value: [{ $$type: 'keyframe-stop', value: { stop: { $$type: 'size', value: { unit: '%', size: 0 } }, settings: { $$type: 'keyframe-stop-settings', value: { opacity: { $$type: 'size', value: { unit: '%', size: 0 } } } } } }] } } };
+    kfMutate(a.custom_effect.value.keyframes);
+  });
+  assert.match(errsOf(broken((v, a) => { a.effect.value = 'custom'; }))[0].message, /custom' without a non-empty custom_effect/);
+  assert.match(errsOf(customize((kfs) => { kfs.value = []; }))[0].message, /non-empty/);
+  assert.match(errsOf(customize((kfs) => { delete kfs.value[0].value.stop; }))[0].message, /stop.*required/);
+  assert.match(errsOf(customize((kfs) => { delete kfs.value[0].value.settings; }))[0].message, /settings.*required/);
+  assert.match(errsOf(customize((kfs) => { kfs.value[0].value.settings.value.blur = { $$type: 'size', value: { unit: 'px', size: 4 } }; }))[0].message, /blur.*opacity\|move\|rotate\|scale\|skew/);
+  assert.equal(errsOf(customize(() => {})).length, 0, 'the unmutated custom item is valid');
+});
+
+test('lint: invalid-interaction — >5 items is the ONE hard server failure (whole save throws)', () => {
+  const six = withItems(...Array.from({ length: 6 }, () => interaction()));
+  const f = errsOf(six);
+  assert.equal(f.length, 1);
+  assert.match(f[0].message, /6 interactions.*WHOLE page save fails/);
+});
+
+test('lint: invalid-interaction decodes the SAVED shape (JSON string / $$type array wrapper)', () => {
+  const bad = structuredClone(interaction());
+  bad.value.trigger.value = 'blur';
+  assert.equal(errsOf(ixBundle(JSON.stringify({ items: [bad], version: 1 }))).length, 1, 'JSON-string interactions decoded');
+  assert.equal(errsOf(ixBundle({ version: 1, items: { $$type: 'array', value: [bad] } })).length, 1, '$$type array wrapper decoded');
+});
+
+test('lint: pro-interaction warns on pro-flagged fields ("saves everywhere, animates with Pro")', () => {
+  const proish = withItems(
+    interaction({ trigger: 'hover' }),
+    interaction({ trigger: 'scrollOut' }),
+    interaction({ effect: 'custom', keyframes: [{ stop: 0, opacity: 0 }] }),
+    interaction({ easing: 'easeOut', replay: true }),
+  );
+  const f = of(lintBundle(proish), 'pro-interaction');
+  assert.equal(f.length, 4, formatLint(lintBundle(proish)));
+  assert.ok(f.every((x) => x.severity === 'warn'));
+  assert.match(f[0].message, /'hover' saves everywhere but animates only with Pro/);
+  assert.match(f[1].message, /scrollOut.*crashes the free 4\.2\.1 handler/, 'the latent free bug is named');
+  assert.match(f[2].message, /'custom' \(keyframes\) renders only with Pro/);
+  assert.match(f[3].message, /easing, replay are DEAD on free/);
+  const free = lintBundle(withItems(interaction(), interaction({ trigger: 'load', effect: 'slide', direction: 'top' })));
+  assert.equal(of(free, 'pro-interaction').length, 0, 'free-tier surface stays silent');
+});

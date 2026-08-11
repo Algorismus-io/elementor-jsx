@@ -716,27 +716,75 @@ export const tabs = (items, { active = 0 } = {}, p = {}) => {
 
 /* ───────────────────────── interactions (FREE core `e_interactions`, default-active) ─────────────────────────
  * Motion presets on any element. Stored as a TOP-LEVEL `interactions` key on the node:
- * {version:1, items:[{$$type:'interaction-item', value:{interaction_id, trigger, animation}}]}.
+ * {version:1, items:[{$$type:'interaction-item', value:{interaction_id, trigger, animation, breakpoints?}}]}.
  * FIELD-FOUND: the runtime sanitizer requires animation.$$type = 'animation-preset-props'
  * (NOT 'animation-preset' as the prop-type class suggests) — wrong type = interactions silently
- * stripped to []. Rendered via a footer JSON blob + motion.js; free triggers load/scrollIn,
- * Pro adds scrollOut/scrollOn/hover/click; effects fade/slide/scale (+Pro custom). Max 5/element. */
+ * stripped to []. Rendered via a footer JSON blob (#elementor-interactions-data) + motion.js.
+ * FREE-TIER REALITY (source-verified 4.2.1): the free handler honors load|scrollIn ONLY —
+ * hover/click/scrollOn items save fine but no-op; scrollOut references an out-of-scope var and
+ * THROWS at trigger time (never default to it); easing/replay/repeat/times/start/end/relativeTo
+ * save but are dead (handler hardcodes defaultEasing + replay:false); effect 'custom' is Pro-only
+ * at runtime. Server save semantics: invalid items are silently STRIPPED (lint is the honest
+ * failure surface); the ONLY hard failure is >5 items per element (whole save throws). */
 const IX_TRIGGERS = new Set(['load', 'scrollIn', 'scrollOut', 'scrollOn', 'hover', 'click']);
 const IX_EFFECTS = new Set(['fade', 'slide', 'scale', 'custom']);
+const IX_TYPES = new Set(['in', 'out']);
+const IX_DIRECTIONS = new Set(['', 'left', 'right', 'top', 'bottom', 'top-left', 'top-right', 'bottom-left', 'bottom-right']);
+const IX_REPEAT = new Set(['', 'loop', 'times']);
+const IX_BREAKPOINTS = new Set(['mobile', 'mobile_extra', 'tablet', 'tablet_extra', 'laptop', 'desktop', 'widescreen']);
 const SZms = (v) => ({ $$type: 'size', value: { unit: 'ms', size: v } });
+const SZpct = (v) => ({ $$type: 'size', value: { unit: '%', size: v } });
+/* custom-effect keyframes — envelope shapes mirror the editor's own plain→prop conversion
+ * (editor-interactions custom-effect-to-prop-value.ts): stop → % size; opacity ≤1 → ×100 %;
+ * scale → number x/y/z (default 1); rotate → deg x/y/z; move → px x/y/z; skew → deg x/y. */
+const KF_AXES = (type, plain, def, mk) => ({ $$type: type, value: Object.fromEntries(
+  (type === 'transform-skew' ? ['x', 'y'] : ['x', 'y', 'z']).map((ax) => [ax, mk(plain[ax] ?? def)]),
+) });
+const keyframeStop = (kf, i) => {
+  const { stop, ...settings } = kf || {};
+  if (typeof stop !== 'number' || stop < 0 || stop > 100) throw new Error(`interaction: keyframes[${i}].stop "${stop}" — a 0-100 percent number is required`);
+  const unknown = Object.keys(settings).filter((k) => !['opacity', 'move', 'rotate', 'scale', 'skew'].includes(k));
+  if (unknown.length) throw new Error(`interaction: keyframes[${i}] has unknown setting(s) ${unknown.join(', ')} — the schema allows opacity|move|rotate|scale|skew only`);
+  if (!Object.keys(settings).length) throw new Error(`interaction: keyframes[${i}] sets nothing — give it at least one of opacity|move|rotate|scale|skew`);
+  const value = {};
+  if (settings.opacity !== undefined) value.opacity = SZpct(settings.opacity <= 1 ? Math.round(settings.opacity * 100) : settings.opacity);
+  if (settings.scale !== undefined) value.scale = KF_AXES('transform-scale', settings.scale, 1, N);
+  if (settings.rotate !== undefined) value.rotate = KF_AXES('transform-rotate', settings.rotate, 0, (v) => SZ(v, 'deg'));
+  if (settings.move !== undefined) value.move = KF_AXES('transform-move', settings.move, 0, (v) => SZ(v, 'px'));
+  if (settings.skew !== undefined) value.skew = KF_AXES('transform-skew', settings.skew, 0, (v) => SZ(v, 'deg'));
+  return { $$type: 'keyframe-stop', value: { stop: SZpct(stop), settings: { $$type: 'keyframe-stop-settings', value } } };
+};
 let _ixN = 0;
-/** one interaction-item envelope (validator-exact). */
-export const interaction = ({ trigger = 'load', effect = 'fade', type = 'in', direction = '', duration = 600, delay = 0, easing, replay } = {}) => {
+/** one interaction-item envelope (validator-exact — mirrors validation.php field by field). */
+export const interaction = ({ trigger = 'scrollIn', effect = 'fade', type = 'in', direction = '', duration = 600, delay = 0, easing, replay, relativeTo, repeat, times, start, end, excludeOn, keyframes } = {}) => {
   if (!IX_TRIGGERS.has(trigger)) throw new Error(`interaction: trigger "${trigger}" — enum is ${[...IX_TRIGGERS].join('|')}`);
   if (!IX_EFFECTS.has(effect)) throw new Error(`interaction: effect "${effect}" — enum is ${[...IX_EFFECTS].join('|')}`);
+  if (!IX_TYPES.has(type)) throw new Error(`interaction: type "${type}" — enum is in|out`);
+  if (!IX_DIRECTIONS.has(direction)) throw new Error(`interaction: direction "${direction}" — enum is ${[...IX_DIRECTIONS].filter(Boolean).join('|')} (or '' for none)`);
+  if (repeat !== undefined && !IX_REPEAT.has(repeat)) throw new Error(`interaction: repeat "${repeat}" — enum is loop|times (or '' for none)`);
+  for (const [k, v] of [['duration', duration], ['delay', delay]]) {
+    if (typeof v !== 'number' || !isFinite(v) || v < 0) throw new Error(`interaction: ${k} "${v}" — a non-negative ms number is required (the sanitizer silently strips anything else)`);
+  }
+  if (effect === 'custom' && !(Array.isArray(keyframes) && keyframes.length)) throw new Error("interaction: effect 'custom' needs a non-empty keyframes array — the server silently strips a keyframe-less custom item");
+  if (effect !== 'custom' && keyframes !== undefined) throw new Error(`interaction: keyframes with effect '${effect}' — keyframes belong to effect 'custom' only`);
+  if (excludeOn !== undefined) {
+    if (!Array.isArray(excludeOn) || !excludeOn.length) throw new Error("interaction: excludeOn must be a non-empty breakpoint array, e.g. ['mobile']");
+    for (const bp of excludeOn) if (!IX_BREAKPOINTS.has(bp)) throw new Error(`interaction: excludeOn "${bp}" — known breakpoints: ${[...IX_BREAKPOINTS].join('|')}`);
+  }
+  const cfg = { easing, relativeTo, repeat, ...(replay !== undefined ? { replay: B(replay) } : {}), ...(times !== undefined ? { times: N(times) } : {}), ...(start !== undefined ? { start: SZpct(start) } : {}), ...(end !== undefined ? { end: SZpct(end) } : {}) };
+  for (const k of ['easing', 'relativeTo', 'repeat']) if (cfg[k] !== undefined) cfg[k] = S(cfg[k]); else delete cfg[k];
   const value = {
     interaction_id: S(`ix-${(_ixN++).toString(36)}`),
     trigger: S(trigger),
     animation: { $$type: 'animation-preset-props', value: {
       effect: S(effect), type: S(type), direction: S(direction),
       timing_config: { $$type: 'timing-config', value: { duration: SZms(duration), delay: SZms(delay) } },
-      ...(easing || replay !== undefined ? { config: { $$type: 'animation-config', value: { ...(easing ? { easing: S(easing) } : {}), ...(replay !== undefined ? { replay: B(replay) } : {}) } } } : {}),
+      // config key is 'config-v2' (Animation_Config_Prop_Type::get_key) — validation.php never
+      // checks it today, but the editor reads by prop-type key; keep canonical.
+      ...(Object.keys(cfg).length ? { config: { $$type: 'config-v2', value: cfg } } : {}),
+      ...(effect === 'custom' ? { custom_effect: { $$type: 'custom-effect', value: { keyframes: { $$type: 'keyframes', value: keyframes.map(keyframeStop) } } } } : {}),
     } },
+    ...(excludeOn ? { breakpoints: { $$type: 'interaction-breakpoints', value: { excluded: { $$type: 'excluded-breakpoints', value: excludeOn.map(S) } } } } : {}),
   };
   return { $$type: 'interaction-item', value };
 };
