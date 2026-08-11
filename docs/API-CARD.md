@@ -114,6 +114,46 @@ through verbatim (the decompile round-trip). NOT valid on `<html>` (classic widg
   late — consumers read it at wp_footer parse time). Optional motion smoke pass: scrollIn into
   view, settle ≥ duration+delay, then capture.
 
+## Components (native Elementor components — SPEC 2.0 phase 1)
+
+`defineComponent(fn, {title, props})` → the definition compiles ONCE into a REGISTERED Elementor
+component (created at deploy via `POST /elementor/v1/components`, status publish); every JSX
+invocation emits a native `e-component` instance whose passed props ride as per-instance
+**overridable props** — labeled, grouped controls in the editor; editing the component updates all
+instances. Un-marked functions keep today's inline expansion (zero breakage).
+
+```jsx
+export const PriceCard = defineComponent(
+  ({ plan = 'Basic', cta = 'Start' }) => (
+    <box pad={24} gap={12}>
+      <h2 size={28}>{plan}</h2>
+      {button(cta, 'https://example.com/signup')}
+    </box>
+  ),
+  { title: 'Price Card',
+    props: { plan: { label: 'Plan name', group: 'Content' },
+             cta:  { label: 'Button label', group: 'Actions' } } },
+);
+// usage: <PriceCard plan="Pro"/> <PriceCard plan="Team" cta="Talk to us"/>
+```
+
+- **THE LOUD CONSTRAINT: props can only override SETTINGS (text, labels, links…) — Elementor
+  components CANNOT override styles or classes. Period.** A style-feeding prop (`tint`,
+  `radius`, any sx-ish value) is a BUILD error. Visual variants = N registered components
+  (`CardDark`, `CardLight` — the blessed idiom), or drop `defineComponent` to keep inline
+  expansion for that component.
+- Baseline values: `props.<k>.default` or the fn's own JS param defaults — they become the
+  component's origin values; only props PASSED at an invocation become overrides.
+- v1 rules (build errors, mirroring the server 422s): a prop must land on EXACTLY ONE settings
+  prop (multi-target = error); no structure-changing props (conditionals); no children on
+  instances; atomic-only trees (**no `<html>`/navBar/browserMock inside** — classic widgets);
+  no cycles; ≤100 components; unique titles; title 2..200 chars.
+- Deploy: components create BEFORE pages; bundles stay uid-keyed (per-site ids rewritten in).
+  **No active Pro (403) → WARN + inline expansion for that deploy — pages render identically,
+  just not linked.** Redeploy: unchanged components are reused by uid; a CHANGED component
+  WARNS and keeps the deployed tree (native update path = phase 2; force now: archive the
+  component in Elementor, redeploy).
+
 ## sx style props (on any intrinsic / box())
 
 Sizes (`w h maxw minh gap size radius pad m`): number = px, or a unit string `'N<unit>'` with

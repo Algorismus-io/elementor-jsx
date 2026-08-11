@@ -104,6 +104,9 @@ async function build(entry) {
     } else {
       if (r.kitSkipped) console.log(`deployed (--only): kit skipped, ${r.pages.length} page(s)`);
       else console.log(`deployed: ${r.variables} variables + ${r.classes} classes (2 kit writes), ${r.pages.length} page(s)`);
+      // native components (spec 2.0): per-component outcome; the inline-expansion fallback is warned by deployBundle itself
+      for (const c of r.components || []) console.log(`  component ${c.action} "${c.title}"${c.id ? ` → id ${c.id}` : ''} (uid ${c.uid})`);
+      if (r.componentsExpanded) console.log(`  components: ${r.componentsExpanded} inline-expanded (fallback — see WARN above)`);
       if (r.classesMerged) console.error(`WARN: ${r.classesMerged}`);
       r.pages.forEach((p) => console.log(`  ${p.action} "${p.title}" → id ${p.id} (/${p.slug}/)`));
       const drifted = r.pages.filter((p) => p.action === 'skipped-drifted');

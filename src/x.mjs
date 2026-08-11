@@ -43,3 +43,6 @@ export {
 export {
   Fragment, h, useTheme, useCtx, render, renderPage
 } from './runtime.mjs';
+export {
+  defineComponent
+} from './component.mjs';
