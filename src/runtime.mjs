@@ -5,11 +5,11 @@
  *
  * Two kinds of `type`:
  *   - function  → a Component: called as (props, ctx) → returns more vnodes (or a kit node).
- *   - string    → an intrinsic: 'box'|'row'|'col'|'section'|'h1..h3'|'text'|'html'|'img' → kit builder.
+ *   - string    → an intrinsic: 'box'|'row'|'col'|'section'|'grid'|'h1..h3'|'text'|'html'|'img' → kit builder.
  * A returned kit node (has .elType) passes straight through — the escape hatch to raw kit.
  */
 import { box, sx, styled, h2 as kh2, h3 as kh3, txt as ktxt } from './kit/kit-components.mjs';
-import { heading, para, image, imageUrl, node, LINK, interact } from './kit/kit.mjs';
+import { heading, para, image, imageUrl, node, nativeGrid, LINK, interact } from './kit/kit.mjs';
 import { mergeTw } from './tw.mjs';
 
 /* Symbol.for, not Symbol: a relative-import entry gets its OWN bundled runtime copy (the cli's
@@ -115,6 +115,18 @@ function intrinsic(type, props, children) {
       if (href) b.settings.link = LINK(href);   // container-level link (cross-page nav chips, clickable cards)
       return withFx(addGcls(markCls(b, cls), gcls));
     }
+    case 'grid': {
+      // NATIVE e-grid container (Elementor ≥ 4.2). cols/rows: number = equal fr tracks
+      // (repeat(N,1fr)), string = custom track list. gapX/gapY (or gap-x-*/gap-y-* via tw)
+      // compile to the two-axis layout-direction gap. sx-computed envelopes (pad/gap/tw
+      // gridCols…) override the nativeGrid defaults per prop key.
+      const { cols, rows, ...styleRest } = style;
+      const g = nativeGrid({ cols, rows, tag, props: sx(styleRest) }, kids());
+      if (id) g.settings._cssid = { $$type: 'string', value: id };
+      if (href) g.settings.link = LINK(href);
+      if (raw) styled(g, { raw });
+      return withFx(addGcls(markCls(g, cls), gcls));
+    }
     case 'h1': case 'h2': case 'h3': case 'h4': case 'heading': {
       // dyn={dyn.postTitle()} binds the content to a dynamic tag (children ignored)
       const hn = heading(type === 'heading' ? tag || 'h2' : type, dynTag ?? textOf(children), sx(style));
@@ -146,7 +158,7 @@ function intrinsic(type, props, children) {
     }
     default:
       throw new Error(
-        `exjsx: unknown intrinsic <${type}> — valid: box|div|row|col|section (containers), ` +
+        `exjsx: unknown intrinsic <${type}> — valid: box|div|row|col|section|grid (containers), ` +
           `h1|h2|h3|h4|heading, text|p, img, html. No <button>/<a>: use <text href="…"> ` +
           `(renders a real anchor) or the kit button() helper; no <span>: use raw CSS accents.`,
       );

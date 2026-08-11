@@ -111,6 +111,8 @@ const SX_ALIAS = {
   'border-radius': 'radius', borderRadius: 'radius', 'box-shadow': 'shadow', boxShadow: 'shadow',
   'object-fit': 'fit', objectFit: 'fit', position: 'pos',
   'grid-template-columns': 'gridCols', gridTemplateColumns: 'gridCols',
+  'grid-template-rows': 'gridRows', gridTemplateRows: 'gridRows',
+  'column-gap': 'gapX', columnGap: 'gapX', 'row-gap': 'gapY', rowGap: 'gapY',
 };
 function unalias(o) {
   let out = null;
@@ -163,7 +165,13 @@ export function sx(o = {}) {
   if (o.m != null) { const v = boxVal(o.m, 'm'); p.margin = Array.isArray(v) ? M(...v) : typeof v === 'object' ? PDIM(v) : M(v); }
   if (o.center) p.margin = M(0, 'auto');
   if (o.radius != null) p['border-radius'] = RAD(typeof o.radius === 'string' ? len(o.radius, 'radius') : o.radius);
-  if (o.gap != null) p.gap = len(o.gap, 'gap');
+  // gapX/gapY (column-gap/row-gap aliases) → ONE layout-direction gap envelope — NEVER the
+  // row-gap/column-gap prop keys (not in the style schema; assertTree rejects them). A single
+  // axis is legal (the PHP Multi_Props_Transformer isset-filters the {column,row} shape).
+  if (o.gapX != null || o.gapY != null) {
+    const gx = o.gapX ?? o.gap; const gy = o.gapY ?? o.gap;
+    p.gap = { $$type: 'layout-direction', value: { ...(gx != null ? { column: len(gx, 'gapX') } : {}), ...(gy != null ? { row: len(gy, 'gapY') } : {}) } };
+  } else if (o.gap != null) p.gap = len(o.gap, 'gap');
   if (o.w != null) p.width = width(o.w);
   if (o.maxw != null) p['max-width'] = len(o.maxw, 'maxw');
   if (o.minh != null) p['min-height'] = len(o.minh, 'minh');
@@ -210,9 +218,16 @@ export function sx(o = {}) {
     if (!Number.isFinite(sp)) throw new Error(`sx span: '${o.span}' is not a number — grid-column span takes an integer`);
     p['grid-column'] = { $$type: 'span', value: sp };
   }
+  // grid-row span — same authored NUMBER form as span (deploy adapts to 'span N' on 4.2+ targets)
+  if (o.rowSpan != null) {
+    const sp = Number(o.rowSpan);
+    if (!Number.isFinite(sp)) throw new Error(`sx rowSpan: '${o.rowSpan}' is not a number — grid-row span takes an integer`);
+    p['grid-row'] = { $$type: 'span', value: sp };
+  }
   if (o.flex != null) p.flex = FLEX(o.flex);
   if (o.display) p.display = S(o.display);
   if (o.gridCols != null) { p.display = S('grid'); p['grid-template-columns'] = S(typeof o.gridCols === 'number' ? `repeat(${o.gridCols}, 1fr)` : o.gridCols); }
+  if (o.gridRows != null) { p.display = S('grid'); p['grid-template-rows'] = S(typeof o.gridRows === 'number' ? `repeat(${o.gridRows}, 1fr)` : o.gridRows); }
   if (o.pos) p.position = S(o.pos);
   if (o.shadow) p['box-shadow'] = Array.isArray(o.shadow) ? SHADOW(...o.shadow) : o.shadow;
   if (o.fit) p['object-fit'] = S(o.fit);

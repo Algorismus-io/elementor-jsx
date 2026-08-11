@@ -76,6 +76,30 @@ export const RAD = (r) => ({
   $$type: 'border-radius',
   value: { 'start-start': szv(r), 'start-end': szv(r), 'end-end': szv(r), 'end-start': szv(r) },
 });
+/**
+ * Grid track list for e-grid's grid-template-columns/rows ($$type 'grid-track-size' — verified
+ * against grid-track-size-prop-type.php + its transformer, Elementor 4.2.1). Number N → N equal
+ * fr tracks (renders `repeat(N, 1fr)` via Grid_Track_Renderer); string → CUSTOM track list
+ * verbatim ('240px 1fr 1fr', 'auto'). 4.2+ ONLY: the 4.1.x style schema has no grid-track-size
+ * (plain string envelopes still validate everywhere — the sx gridCols path).
+ */
+export const TRACKS = (v) => {
+  if (typeof v === 'number') {
+    if (!Number.isInteger(v) || v < 1) throw new Error(`TRACKS: ${v} — fr track count must be a positive integer (repeat(N, 1fr)); custom lists go as strings`);
+    return { $$type: 'grid-track-size', value: { unit: 'fr', size: v } };
+  }
+  return { $$type: 'grid-track-size', value: { unit: 'custom', size: String(v) } };
+};
+/**
+ * Two-axis gap ($$type 'layout-direction', {column, row} of sizes — verified against
+ * layout-direction-prop-type.php; Multi_Props_Transformer renders column-gap/row-gap and
+ * isset-filters, so a SINGLE axis is legal). Numbers are px; size envelopes pass through.
+ * Validates on 4.1.4 too (gap is a Union of layout-direction | size in both schemas).
+ */
+export const GAPXY = (x, y = x) => ({
+  $$type: 'layout-direction',
+  value: { ...(x != null ? { column: szv(x) } : {}), ...(y != null ? { row: szv(y) } : {}) },
+});
 /** Top-corners-only radius (cards over flush footers, tab headers). */
 export const RADT = (r) => ({
   $$type: 'border-radius',
@@ -337,7 +361,7 @@ export function clone(subtree) {
 
 /* ─────────────────────────── container & widget primitives ─────────────────────────── */
 
-const CONTAINER_TYPES = new Set(['e-flexbox', 'e-div-block']);
+const CONTAINER_TYPES = new Set(['e-flexbox', 'e-div-block', 'e-grid']);
 
 export const fx = (p, ch = []) =>
   node('e-flexbox', { tag: 'div', props: { display: S('flex'), padding: P0, ...p }, children: ch });
@@ -357,6 +381,35 @@ export const grid = (tmpl, gap, p, ch = []) =>
     },
     children: ch,
   });
+/**
+ * NATIVE e-grid container (Elementor ≥ 4.2 — the 4.1.x validator has neither the e-grid element
+ * nor grid-track-size; on 4.1.x keep using grid(), the e-flexbox display:grid emulation).
+ * Explicitness doctrine, same policy as the padding rule: e-grid's BASE styles bake display:grid,
+ * 3fr/2fr tracks, 20px two-axis gap, 10px padding AND a mobile 1-column override (grid.php) — so
+ * every one of those is re-emitted explicitly on the local class where the author controls it.
+ *   cols/rows: number = that many equal fr tracks (TRACKS → repeat(N,1fr)), string = custom track
+ *   list ('240px 1fr'). rows defaults to 'auto' (kills the base repeat(2,1fr) equal-height leak).
+ *   gap: number or [column, row] → ONE layout-direction envelope (never row-gap/column-gap keys).
+ *   The mobile 1-col default merges UNDER props._m — an author _m grid-template-columns wins.
+ */
+export const nativeGrid = ({ cols = 3, rows, gap = 20, tag = 'div', props = {} } = {}, ch = []) => {
+  const { _m, ...rest } = props;
+  const mob = { ...('grid-template-columns' in (_m ?? {}) ? {} : { 'grid-template-columns': TRACKS(1) }), ...(_m ?? {}) };
+  return node('e-grid', {
+    tag,
+    props: {
+      display: S('grid'),
+      'grid-template-columns': TRACKS(cols),
+      'grid-template-rows': TRACKS(rows ?? 'auto'),
+      gap: Array.isArray(gap) ? GAPXY(...gap) : GAPXY(gap),
+      padding: P0,
+      ...rest,
+      _m: mob,
+    },
+    children: ch,
+  });
+};
+
 /** A hug-width row — container children of flex rows MUST hug or they claim 100% and wrap to a new line. */
 export const hugRow = (p, ch = []) => row({ width: HUG, ...p }, ch);
 export const hugCol = (p, ch = []) => col({ width: HUG, ...p }, ch);
@@ -709,6 +762,38 @@ export const formLabel = (forId, text, p = {}) =>
   node('widget', { widgetType: 'e-form-label', settings: { tag: S('label'), text: HTML(text), 'input-id': S(forId) }, props: p });
 export const formSubmit = (text = 'Submit', p = {}) =>
   node('widget', { widgetType: 'e-form-submit-button', settings: { text: HTML(text), tag: S('button') }, props: p });
+/**
+ * Native form status messages (free core ≥ 4.1.1): e-form-success-message / e-form-error-message
+ * container elements, hidden by their base styles. On submit the core form handler flips
+ * `form-state-success|error` on the e-form and core inline CSS reveals the matching child
+ * (`form[data-element_type=e-form].form-state-success [data-element_type=e-form-success-message]
+ * { display:block }` — module.php add_inline_styles). They are ORDINARY SAVED CHILDREN — the
+ * server does NOT auto-create them on REST save (live-probed on 4.2.1: saved tree ≡ sent tree),
+ * so the compiler must emit them or submissions render zero feedback. form() adds both by
+ * default; use these directly for custom copy/placement. Only e-paragraph children are allowed
+ * (define_allowed_child_types). Default texts mirror the native builder's.
+ */
+export const formSuccessMessage = (text = 'Great! We’ve received your information.', p = {}) =>
+  node('e-form-success-message', { props: p, children: [para(text)] });
+export const formErrorMessage = (text = 'We couldn’t process your submission. Please retry', p = {}) =>
+  node('e-form-error-message', { props: p, children: [para(text)] });
+
+/**
+ * Native checkbox row — `e-form-checkbox-row` is NOT an element type: it's a literal CSS class on
+ * a plain e-flexbox that atomic-form.php's build_checkbox_row() emits, styled by the form's OWN
+ * scoped base rule (`.e-<base> .e-form-checkbox-row` → align-center/gap 8/padding 0). This mirrors
+ * that exactly: e-form-checkbox + e-form-label linked by _cssid ↔ input-id, class attached.
+ * `opts` go to the checkbox (value/checked/required; `name` defaults to the id).
+ */
+export const checkboxRow = (id, label, opts = {}, p = {}) => {
+  const { name, ...cbOpts } = opts;
+  const cb = formCheckbox(name ?? id, cbOpts);
+  cb.settings._cssid = S(id);
+  const r = row({ 'align-items': S('center'), gap: SZ(8), padding: P0, width: SZ(100, '%'), ...p }, [cb, formLabel(id, label)]);
+  r.settings.classes = CLS(['e-form-checkbox-row', ...(r.settings.classes?.value ?? [])]);
+  return r;
+};
+
 /** label+input pair in a column — the everyday field group. `opts` go to the input (type/required/…).
  * `{ textarea: true, rows? }` routes to formTextarea (field-report: agents expect this spelling —
  * it used to throw into the input-type enum). */
@@ -724,15 +809,25 @@ export const field = (id, label, opts = {}, p = {}) => {
  * The e-form container element. actions: 'email' | 'collect-submissions' | 'webhook' (array).
  *   form({ name:'contact', actions:['email'], email: EMAIL_ACTION({to:'x@y.z'}) }, [ …fields… ])
  * Children are field widgets/containers. Pro required for fields + submission handling.
+ * Native SUCCESS/ERROR status messages are appended by default (they're plain saved children —
+ * without them a submit renders zero feedback; see formSuccessMessage). Override the copy with
+ * successMessage/errorMessage, place your own formSuccessMessage()/formErrorMessage() among the
+ * children (form() detects and won't duplicate), or opt out entirely with messages:false.
  */
-export const form = ({ name = 'form', actions = ['email'], email, webhook, props = {} } = {}, children = []) => {
+export const form = ({ name = 'form', actions = ['email'], email, webhook, messages = true, successMessage, errorMessage, props = {} } = {}, children = []) => {
   const settings = {
     'form-name': S(name),
     'actions-after-submit': { $$type: 'string-array', value: actions.map(S) }, // items are FULL string envelopes
     ...(email ? { email } : {}),
     ...(webhook ? { webhook_url: S(webhook) } : {}),
   };
-  return node('e-form', { settings, props: { padding: P0, ...props }, children });
+  const kids = [...children];
+  if (messages) {
+    const has = (t) => kids.some((c) => c?.elType === t);
+    if (!has('e-form-success-message')) kids.push(formSuccessMessage(successMessage));
+    if (!has('e-form-error-message')) kids.push(formErrorMessage(errorMessage));
+  }
+  return node('e-form', { settings, props: { padding: P0, ...props }, children: kids });
 };
 
 /* ─────────────────────────────── icons + interactivity ─────────────────────────────── */

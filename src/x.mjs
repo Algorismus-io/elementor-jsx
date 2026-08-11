@@ -16,11 +16,12 @@
  */
 export {
   S, C, N, B, SZ, DIM, P0, M, PDIM, RAD, RADT, RADB, BG, GRAD, SHADOW, HUG, AUTO, HTML, LINK,
-  CLS, IMG_ID, IMG_URL, SVG_ID, CUSTOM_CSS, VIDEO_URL, VIDEO_ID, KV, EMAIL_ACTION, node, css,
-  clone, fx, assertTree, emit, col, row, grid, hugRow, hugCol, bar, hero, hamburgerNav, sect,
-  abs, archConvex, archConcave, heading, para, button, image, imageUrl, textLink, divider,
-  youtube, video, tabs, DYN, isDyn, dyn, IMG_DYN, interaction, interact, loopGrid, formInput,
-  formTextarea, formSelect, formCheckbox, formLabel, formSubmit, field, form, normalizeFaValue,
+  CLS, IMG_ID, IMG_URL, SVG_ID, CUSTOM_CSS, VIDEO_URL, VIDEO_ID, KV, EMAIL_ACTION, TRACKS, GAPXY,
+  node, css, clone, fx, assertTree, emit, col, row, grid, nativeGrid, hugRow, hugCol, bar, hero,
+  hamburgerNav, sect, abs, archConvex, archConcave, heading, para, button, image, imageUrl,
+  textLink, divider, youtube, video, tabs, DYN, isDyn, dyn, IMG_DYN, interaction, interact,
+  loopGrid, formInput, formTextarea, formSelect, formCheckbox, formLabel, formSubmit, field, form,
+  formSuccessMessage, formErrorMessage, checkboxRow, normalizeFaValue,
   faIcon, svgIcon, iconChip, hover, fontLoader, formSuccess
 } from './kit/kit.mjs';
 

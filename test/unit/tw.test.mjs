@@ -40,7 +40,14 @@ const CASES = [
   ['mx-auto → partial auto margins (atomic, not raw)', 'mx-auto', { m: { l: 'auto', r: 'auto' } }],
   ['gap on scale', 'gap-8', { gap: 32 }],
   ['gap arbitrary', 'gap-[18px]', { gap: 18 }],
-  ['gap-x → raw column-gap', 'gap-x-4', { raw: 'column-gap: 16px;' }],
+  ['gap-x → ATOMIC gapX (layout-direction gap, not raw)', 'gap-x-4', { gapX: 16 }],
+  ['gap-y → ATOMIC gapY', 'gap-y-8', { gapY: 32 }],
+  ['gap-x + gap-y together', 'gap-x-4 gap-y-8', { gapX: 16, gapY: 32 }],
+  ['gap-x rem stays raw (size envelope cannot hold it)', 'gap-x-[2rem]', { raw: 'column-gap: 2rem;' }],
+  ['grid-rows on scale', 'grid grid-rows-2', { display: 'grid', gridRows: 2 }],
+  ['grid-rows arbitrary (underscores → spaces)', 'grid-rows-[auto_1fr]', { gridRows: 'auto 1fr' }],
+  ['row-span → rowSpan', 'row-span-3', { rowSpan: 3 }],
+  ['row-span-full → raw grid-row', 'row-span-full', { raw: 'grid-row: 1 / -1;' }],
 
   // ── sizing ──
   ['w-full', 'w-full', { w: '100%' }],
@@ -329,6 +336,11 @@ test('sx aliases: CSS property names map to shorthand envelopes', () => {
   assert.deepEqual(out['font-size'], SZ(40));
   assert.deepEqual(out['align-items'], S('center'));
   assert.deepEqual(out['font-weight'], S('700'));
+});
+test('sx aliases: grid/gap CSS names (columnGap/rowGap → layout-direction, gridTemplateRows)', () => {
+  const out = sx({ columnGap: 16, 'row-gap': 32, gridTemplateRows: 2 });
+  assert.deepEqual(out.gap, { $$type: 'layout-direction', value: { column: SZ(16), row: SZ(32) } });
+  assert.deepEqual(out['grid-template-rows'], S('repeat(2, 1fr)'));
 });
 test('sx aliases: CSS string values parse (padding "96px 24px", fontSize "18px")', () => {
   const out = sx({ padding: '96px 24px', fontSize: '18px', margin: '0 auto' });

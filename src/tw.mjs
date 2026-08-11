@@ -155,8 +155,12 @@ function parseBucket(tokens) {
       case !!(m = tok.match(/^self-(start|end|center|stretch|baseline|auto)$/)):
         R(`align-self: ${ALIGN[m[1]] || m[1]};`); break;
       case !!(m = tok.match(/^gap-(x|y)-(.+)$/)): {
+        // px values stay ATOMIC (sx gapX/gapY → one layout-direction gap envelope); only units
+        // the size envelope can't hold fall back to raw column-gap/row-gap.
         const v = len(m[2], tok);
-        R(`${m[1] === 'x' ? 'column' : 'row'}-gap: ${cssLen(v)};`); break;
+        if (typeof v === 'number') o[m[1] === 'x' ? 'gapX' : 'gapY'] = v;
+        else R(`${m[1] === 'x' ? 'column' : 'row'}-gap: ${cssLen(v)};`);
+        break;
       }
       case !!(m = tok.match(/^gap-(.+)$/)): {
         const v = len(m[1], tok);
@@ -165,8 +169,12 @@ function parseBucket(tokens) {
       }
       case !!(m = tok.match(/^grid-cols-(\d+)$/)): o.gridCols = Number(m[1]); break;
       case !!(m = tok.match(/^grid-cols-\[(.+)\]$/)): o.gridCols = m[1].replace(/_/g, ' '); break;
+      case !!(m = tok.match(/^grid-rows-(\d+)$/)): o.gridRows = Number(m[1]); break;
+      case !!(m = tok.match(/^grid-rows-\[(.+)\]$/)): o.gridRows = m[1].replace(/_/g, ' '); break;
       case tok === 'col-span-full': R('grid-column: 1 / -1;'); break;
       case !!(m = tok.match(/^col-span-(\d+)$/)): o.span = Number(m[1]); break;
+      case tok === 'row-span-full': R('grid-row: 1 / -1;'); break;
+      case !!(m = tok.match(/^row-span-(\d+)$/)): o.rowSpan = Number(m[1]); break;
       case !!(m = tok.match(/^order-(\d+|first|last)$/)):
         R(`order: ${m[1] === 'first' ? -9999 : m[1] === 'last' ? 9999 : m[1]};`); break;
 
