@@ -72,7 +72,11 @@
     "site-generator",
     "elementor-widgets",
     "wordpress-automation",
-    "exjsx"
+    "exjsx",
+    "claude-code",
+    "elementor-mcp",
+    "ai-website-builder",
+    "wordpress-ai"
   ],
   "repository": {
     "type": "git",
