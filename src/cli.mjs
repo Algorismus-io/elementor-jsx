@@ -162,15 +162,45 @@ async function build(entry) {
     const { sideloadManifest } = await import('./media.mjs');
     await sideloadManifest(manifest, (arg2 && !arg2.startsWith('--')) ? arg2 : 'data/media-map.json');
   } else if (cmd === 'decompile') {
-    // exjsx decompile <tree.json> [out.jsx] — invert any Elementor V4 _elementor_data → editable JSX
-    const { decompile } = await import('./decompile.mjs');
-    const tree = JSON.parse(readFileSync(resolve(arg), 'utf8'));
-    const base = basename(arg).replace(/\.json$/, '') || 'page';
+    // exjsx decompile <tree.json|--page <id>> [out.jsx] [--components]
+    //   invert any Elementor V4 _elementor_data → editable JSX. `--page <id>` reads the tree off the
+    //   site (WP_URL/WP_USER/WP_APP_PASSWORD); `--components` additionally resolves every referenced
+    //   NATIVE component (SPEC 2.0) so e-component instances invert to <Name prop=…/> + an exported
+    //   defineComponent, instead of the verbatim <Raw> passthrough.
+    const { decompile, resolveComponents, siteComponentFetcher } = await import('./decompile.mjs');
+    const pi = process.argv.indexOf('--page');
+    const pageId = pi !== -1 ? process.argv[pi + 1] : null;
+    const wantComponents = process.argv.includes('--components') || !!pageId;
+    const wpUrl = (process.env.WP_URL || '').replace(/\/$/, '');
+    const auth = 'Basic ' + Buffer.from(`${process.env.WP_USER}:${process.env.WP_APP_PASSWORD}`).toString('base64');
+    let tree; let base;
+    if (pageId) {
+      if (!wpUrl) { console.error('exjsx decompile --page <id>: WP_URL/WP_USER/WP_APP_PASSWORD are required'); process.exit(2); }
+      const r = await fetch(`${wpUrl}/wp-json/elementor-ultra/v1/documents/${encodeURIComponent(pageId)}`, { headers: { Authorization: auth } });
+      if (!r.ok) { console.error(`exjsx decompile --page ${pageId}: ${r.status} ${(await r.text()).slice(0, 160)}`); process.exit(1); }
+      const j = await r.json();
+      tree = j?.data?.elements ?? j?.elements;
+      base = `page-${pageId}`;
+    } else {
+      if (!arg || arg.startsWith('--')) { console.error('usage: exjsx decompile <tree.json> [out.jsx] [--components]  |  exjsx decompile --page <id> [out.jsx]'); process.exit(2); }
+      tree = JSON.parse(readFileSync(resolve(arg), 'utf8'));
+      base = basename(arg).replace(/\.json$/, '') || 'page';
+    }
+    const els = Array.isArray(tree) ? tree : (tree.content || tree.elements || []);
     const name = base.replace(/[^a-z0-9]+/gi, ' ').replace(/(^|\s)\w/g, (m) => m.trim().toUpperCase()).replace(/\s/g, '') || 'Page';
-    const src = decompile(Array.isArray(tree) ? tree : (tree.content || tree.elements || []), { name, slug: base });
-    const out = (arg2 && !arg2.startsWith('--')) ? arg2 : resolve(dirname(resolve(arg)), `${base}.jsx`);
+    const warnings = [];
+    let components = {};
+    if (wantComponents && wpUrl) {
+      components = await resolveComponents(els, siteComponentFetcher({ url: wpUrl, auth, warn: (m) => warnings.push(m) }), { warn: (m) => warnings.push(m) });
+    } else if (wantComponents) {
+      warnings.push('--components needs WP_URL/WP_USER/WP_APP_PASSWORD — e-component instances stay <Raw>');
+    }
+    const src = decompile(els, { name, slug: base, components, warnings });
+    const out = (arg2 && !arg2.startsWith('--') && arg2 !== pageId) ? arg2
+      : resolve(pageId ? process.cwd() : dirname(resolve(arg)), `${base}.jsx`);
     writeFileSync(out, src);
-    console.log(`decompiled ${base}: ${tree.length ?? '?'} top-level elements → ${src.split('\n').length} lines`);
+    console.log(`decompiled ${base}: ${els.length} top-level elements → ${src.split('\n').length} lines${Object.keys(components).length ? `, ${Object.keys(components).length} component(s)` : ''}`);
+    for (const w of warnings) console.error(`WARN: ${w}`);
     console.log(`  ${out}`);
   } else if (cmd === 'inspect') {
     // exjsx inspect <bundle.json> [--page <slug>] [--el <id>] — read-only, offline (no WP creds needed)
@@ -277,5 +307,5 @@ export default ({ theme: t }) => (
     const { readFileSync: rf } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     console.log(rf(join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'API-CARD.md'), 'utf8'));
-  } else console.log('usage: exjsx init [dir] | api | build <entry.jsx|project-dir> [out.json] [--inline] | deploy <bundle.json> [--dry] [--only <slug[,slug]>] [--force] [--allow-unregistered] | lint <entry.jsx|bundle.json> [--strict] | import <url-or-html-file> --out <file>.page.jsx [--name <slug>] | media <manifest.mjs> [map.json] | decompile <tree.json> [out.jsx] | inspect <bundle.json> [--page <slug>] [--el <id>]');
+  } else console.log('usage: exjsx init [dir] | api | build <entry.jsx|project-dir> [out.json] [--inline] | deploy <bundle.json> [--dry] [--only <slug[,slug]>] [--force] [--allow-unregistered] | lint <entry.jsx|bundle.json> [--strict] | import <url-or-html-file> --out <file>.page.jsx [--name <slug>] | media <manifest.mjs> [map.json] | decompile <tree.json>|--page <id> [out.jsx] [--components] | inspect <bundle.json> [--page <slug>] [--el <id>]');
 })().catch((e) => { console.error(e.message); process.exit(1); });

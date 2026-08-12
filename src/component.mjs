@@ -38,6 +38,9 @@ const isKitNode = (x) => x && typeof x === 'object' && typeof x.elType === 'stri
  * Mark a component for native registration. `props` declares the OVERRIDABLE surface:
  *   { plan: { label: 'Plan name', group: 'Content', default: 'Basic' } }
  * `default` is the definition's baseline value (falls back to the fn's own JS param defaults).
+ * `key` (rare) decouples the WIRE override key from the JS parameter name — the decompiler emits it
+ * when a foreign component's override key is not a valid JS identifier (editor-authored registries),
+ * so the round-trip keeps the exact key Elementor stores while the JSX stays writable.
  * NOTE (the loud constraint): overridable props can only land on SETTINGS (text, labels, links…).
  * Style-feeding props (tint/radius/sx-ish) are a build error — Elementor components cannot
  * override styles. The blessed idiom for visual variants: N registered components (one per
@@ -50,8 +53,13 @@ export function defineComponent(fn, meta = {}) {
     throw new Error(`defineComponent(${fn.name || 'anonymous'}): meta.title is required, 2..200 chars (Elementor component titles are unique per site)`);
   }
   const propsMeta = meta.props || {};
+  const wireKeys = new Set();
   for (const [k, m] of Object.entries(propsMeta)) {
-    if (!m || typeof m !== 'object') throw new Error(`defineComponent("${title}"): props.${k} must be an object ({label, group?, default?})`);
+    if (!m || typeof m !== 'object') throw new Error(`defineComponent("${title}"): props.${k} must be an object ({label, group?, default?, key?})`);
+    if (m.key !== undefined && (typeof m.key !== 'string' || !m.key)) throw new Error(`defineComponent("${title}"): props.${k}.key must be a non-empty string (the wire override key)`);
+    const wire = m.key || k;
+    if (wireKeys.has(wire)) throw new Error(`defineComponent("${title}"): two props map to the same override key "${wire}" — override keys are unique per component`);
+    wireKeys.add(wire);
   }
   const wrapper = (props, ctx) => fn(props, ctx);   // direct call ≡ inline expansion (zero breakage outside compileSite)
   wrapper.$$component = { fn, title, propsMeta };
@@ -338,6 +346,10 @@ function ensureRegistered(wrapper, reg) {
         throw new Error(`component "${title}": props "${byTarget.get(tk)}" and "${key}" both land in <${t.widgetType ?? t.elType}>.${t.propKey} — one settings prop can carry only one override; merge them into a single prop`);
       }
       byTarget.set(tk, key);
+      // wire key = what Elementor stores (registry key + every override_key envelope); defaults to
+      // the JS param name and only differs when props.<k>.key was declared (decompiled registries).
+      const wire = m.key || key;
+      t.wire = wire;
       def.map[key] = t;
       const el = findById(elements, t.elementId);
       let originValue; let originPropFields = null;
@@ -352,7 +364,7 @@ function ensureRegistered(wrapper, reg) {
         const idx = ovs.findIndex((o) => o.value.override_key === t.innerKey);
         const inner = ovs[idx];
         originValue = inner.value.override_value;
-        ovs[idx] = { $$type: 'overridable', value: { override_key: key, origin_value: inner } };
+        ovs[idx] = { $$type: 'overridable', value: { override_key: wire, origin_value: inner } };
         const childDef = [...reg.defs.values()].find((cd) => cd.uid === el.editor_settings?.component_uid);
         const childEntry = childDef?.overridable_props?.props?.[t.innerKey];
         if (!childEntry) throw new Error(`component "${title}": prop "${key}" forwards to "${t.innerKey}" but the nested component's registry has no such prop (bug; please report)`);
@@ -361,14 +373,14 @@ function ensureRegistered(wrapper, reg) {
       } else {
         originValue = el.settings[t.propKey];
         // the overridable envelope (verified 4.2.1: universal-by-union on every atomic settings prop except classes)
-        el.settings[t.propKey] = { $$type: 'overridable', value: { override_key: key, origin_value: originValue } };
+        el.settings[t.propKey] = { $$type: 'overridable', value: { override_key: wire, origin_value: originValue } };
       }
       const groupLabel = m.group || 'Props';
       const gid = slug(groupLabel);
       if (!groups.items[gid]) { groups.items[gid] = { id: gid, label: groupLabel, props: [] }; groups.order.push(gid); }
-      groups.items[gid].props.push(key);
-      props[key] = {
-        overrideKey: key, label: m.label || key, elementId: t.elementId, propKey: t.propKey,
+      groups.items[gid].props.push(wire);
+      props[wire] = {
+        overrideKey: wire, label: m.label || key, elementId: t.elementId, propKey: t.propKey,
         elType: t.elType, ...(t.widgetType ? { widgetType: t.widgetType } : {}), originValue, groupId: gid,
         // forwarded props only: where the chain ultimately lands (the parser stores null otherwise)
         ...(originPropFields ? { originPropFields } : {}),
@@ -425,7 +437,7 @@ export function emitComponentInstance(wrapper, props = {}, children = []) {
         $$type: 'override',
         // schema_source.id MUST equal component_id (server drops the whole prop otherwise) —
         // both are 0 placeholders here; deploy rewrites them together (rewriteComponentIds).
-        value: { override_key: k, override_value: val, schema_source: { type: 'component', id: 0 } },
+        value: { override_key: m.wire ?? k, override_value: val, schema_source: { type: 'component', id: 0 } },
       });
     }
   }

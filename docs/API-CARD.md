@@ -160,6 +160,8 @@ export const PriceCard = defineComponent(
   its own props into the child (`({plan}) => <Child headline={plan}/>`) — compiles to the native
   `overridable(override)` chain envelope (editor resolve-overrides-chain semantics); the forwarded
   prop needs a DEFAULT (its baseline). One forwarded prop feeds exactly ONE child prop.
+- **Round trip (phase 3)**: `exjsx decompile --page <id>` inverts instances back to
+  `<PriceCard plan=…/>` + the `defineComponent` definitions — see the Decompile section.
 - Deploy route ladder (phase 2): components create BEFORE pages; bundles stay uid-keyed (per-site
   ids rewritten in). Native `elementor/v1/components` first (needs ACTIVE Pro); **on 403 → the
   ultra-mcp plugin's `elementor-ultra/v1/components` controller (free-tier path, same validators
@@ -169,6 +171,40 @@ export const PriceCard = defineComponent(
   exists — with only the native route it WARNS and keeps the deployed tree (force now: archive
   the component in Elementor, redeploy). Sites without the module 501 with the experiments named
   (`e_components` + `e_atomic_elements`).
+
+## Decompile (any live Elementor V4 tree → editable JSX)
+
+```
+exjsx decompile <tree.json> [out.jsx] [--components]     # a saved _elementor_data dump
+exjsx decompile --page <id> [out.jsx]                    # pull the tree off WP_URL (components on)
+```
+
+Inverts structure + local styles to intrinsics/`sx`, global classes to `gcls` refs, custom_css to
+`raw=`, states to `hover={…}`, interactions to `motion={…}`, `settings.attributes` to `attrs={…}`.
+Anything with no shorthand rides verbatim in `props={{…}}`; anything with no JSX spelling at all
+(e-form family, `e--selected` states, unknown widgets) round-trips as `<Raw>{node}</Raw>` — **zero
+loss, always**. Output is ONE module: components first, then the page.
+
+- **Native components (SPEC 2.0 phase 3)**: an `e-component` instance is inverted to
+  `<PriceCard plan={"Pro"}/>` and the component DOCUMENT it points at is emitted once as an exported
+  `defineComponent(…)` above the page — parameters, `label`/`group` and defaults come from the
+  overridable-props registry; a nested instance inside another component decompiles to prop
+  FORWARDING (`<PriceCard plan={tier}/>`, the `overridable(override)` chain).
+- Reads used: `GET elementor/v1/components` + `…/components/overridable-props` (native) and
+  `GET elementor-ultra/v1/documents/{id}` for the tree — **Elementor exposes no native
+  component-tree route**, so without the elementor-ultra-mcp plugin the registry alone can't rebuild
+  a definition and instances stay `<Raw>` (warned, never fatal). Same for a component that fails to
+  fetch or overrides a prop with no JSX surface (media, form actions).
+- Parameter names keep the override KEY when it is a valid JS identifier (so exjsx-authored uids
+  stay byte-stable); an editor-authored key that isn't gets a name derived from its label plus
+  `key: '<wire key>'` in the props meta, which `defineComponent` honors.
+- Inner element ids of a rendered instance are DERIVED (per-instance hash) — the decompiler keys on
+  `origin_id`/the component document's own ids and never on a rendered id.
+- Known asymmetries: a deduped page stores only `g-…` class REFERENCES (definitions live in the
+  site's class registry, which decompile can't see), so a rebuilt container re-mints a class for its
+  intrinsic's baked defaults and keeps the original ref; and a component's `uid` fingerprints the
+  AUTHORED tree while the site stores the version-adapted one — decompile → redeploy therefore reads
+  as a component UPDATE (title match, new uid), not a no-op.
 
 ## sx style props (on any intrinsic / box())
 

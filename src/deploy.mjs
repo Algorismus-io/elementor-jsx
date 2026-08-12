@@ -280,7 +280,9 @@ export function planComponents(locals, remoteItems, opts = {}) {
  * the ultra route turned out unusable at PUT time (degrade to v1 reuse semantics, never silently) */
 const staleWarning = (c, t) =>
   `component "${c.title}": local tree CHANGED since last deploy (local uid ${c.uid}` +
-  `${c.treeHash ? `, tree ${c.treeHash}` : ''} ≠ deployed uid ${t.uid ?? t.deployedUid ?? '?'}) — reusing id ${t.id}; ` +
+  // `deployedUid` FIRST: on the degrade-from-update path the entry is a plan item whose `uid` is the
+  // LOCAL fingerprint, so reading `t.uid` printed the same uid on both sides of the ≠ (E2E-found).
+  `${c.treeHash ? `, tree ${c.treeHash}` : ''} ≠ deployed uid ${t.deployedUid ?? t.uid ?? '?'}) — reusing id ${t.id}; ` +
   `instances keep rendering the DEPLOYED tree (Elementor ships no update route — install/upgrade the ` +
   `elementor-ultra-mcp plugin for in-place component updates; to force the new tree now, archive the ` +
   `component in Elementor and redeploy)`;
