@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.0.0
+
+**Components, both directions.** A JSX component registered with `defineComponent` compiles to a
+native Elementor component, deploys as a real component document with editable per-instance props,
+and — new in this release — decompiles back to source. The abstraction now survives the round trip:
+source → site → source.
+
+Everything since 1.6.x, in one line each:
+- **1.7.0** native `e-grid` + `e-form` status messages → 100% of free-core V4 atomic elements.
+- **1.7.1** per-state `custom_css`, the `attrs` prop, native state variants (`hover:`/`active:`/
+  `focus-visible:`/`checked:` emit editor-visible variants when every declaration maps to a schema
+  prop, raw CSS otherwise).
+- **1.8.0** `motion={…}` → native Elementor interactions, lint-mirrored against the server's own
+  validator (it strips invalid items SILENTLY, so lint is the only honest failure surface) plus a
+  reduced-motion guard Elementor itself does not ship.
+- **1.9.0/1.9.1** `defineComponent` phases 1–2: registration seam, sentinel-diff prop mapping,
+  the native → ultra → inline-expansion deploy ladder, in-place updates through the route Elementor
+  lacks, and prop forwarding into nested components.
+- **1.9.2** deploy capability gate (fails BEFORE creating posts when the target lacks an element
+  type) + deploy atomicity, `exjsx dev` surfacing deploy failures instead of reporting success,
+  component build guards, and `shadow` accepting arrays.
+
+**Known behaviour:** a component's uid fingerprints the AUTHORED tree while the site stores the
+version-adapted one, so `decompile → redeploy` reads as an UPDATE (in-place via the ultra route)
+rather than a no-op. `source → deploy → redeploy` is idempotent as before.
+
 ## Unreleased
 
 **SPEC 2.0 components — PHASE 3: the decompile round trip.** `e-component` instances used to fall
