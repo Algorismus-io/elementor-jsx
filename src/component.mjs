@@ -84,13 +84,21 @@ export function finalizeComponents() {
 export function endComponents() { globalThis[REG_KEY] = null; }
 
 /* ── normalization (shared by definition, sentinel and extraction renders) ──
- * Deterministic walk-order ids (c00000…) so two renders of the same fn produce IDENTICAL trees
+ * Deterministic walk-order ids (c<salt>0000…) so two renders of the same fn produce IDENTICAL trees
  * except where a changed prop landed — the property the sentinel diff and the uid hash both need.
+ * The salt is djb2(title), UNIQUE PER COMPONENT (titles are unique by validation): without it every
+ * component's ids start at c00000 and the LOCAL STYLE ids that embed them collide ACROSS components —
+ * each component ships its own local-<id>.css but the selectors (.e-c00000-s…) are shared, so on any
+ * page rendering two different components the last-enqueued file wins and one component steals the
+ * other's box styles (live-found on the phase-2 E2E: the parent rendered the child's background).
+ * Inner-element DOM ids are per-instance-hashed natively (Format_Component_Elements_Id) — CLASS
+ * names are not, so uniqueness must come from the authored ids, exactly like editor-created
+ * components whose random ids never collide.
  * Also strips the __cls dedup hint (page-only machinery; an unknown key would leak to the server —
  * component trees keep LOCAL styles, they are never routed through extractClasses). */
-function normalizeComponentIds(elements) {
+function normalizeComponentIds(elements, salt = '') {
   let n = 0;
-  const next = () => `c${(n++).toString(36).padStart(5, '0')}`;
+  const next = () => `c${salt}${(n++).toString(36).padStart(4, '0')}`;
   const walk = (node) => {
     const oldId = node.id; const newId = next();
     node.id = newId;
@@ -113,14 +121,14 @@ function normalizeComponentIds(elements) {
 
 /** Render a definition fn to a normalized flat elements array (lazy import dodges the ESM cycle
  * runtime ⇄ component at module-init time; both usages are call-time). */
-function renderFn(fn, props) {
+function renderFn(fn, props, salt = '') {
   // runtime.mjs imports this module (the seam), so a static import of render here would be
   // circular at init. The registered-symbol handoff keeps the import graph one-directional:
   // runtime publishes its render at module init (fresh per bundled copy — always current).
   const _render = globalThis[Symbol.for('exjsx.render')];
   if (!_render) throw new Error('component: runtime render not initialized — import order bug');
   const out = _render({ $$v: true, type: fn, props, children: [] });
-  return normalizeComponentIds((Array.isArray(out) ? out : [out]).filter(isKitNode));
+  return normalizeComponentIds((Array.isArray(out) ? out : [out]).filter(isKitNode), salt);
 }
 
 /* structural signature — same shape ⇒ ids align across renders */
@@ -174,7 +182,7 @@ function mapProp(def, key, title) {
   const sentinel = SENTINEL(key);
   let B;
   try {
-    B = renderFn(def.fn, { ...def.baseProps, [key]: sentinel });
+    B = renderFn(def.fn, { ...def.baseProps, [key]: sentinel }, def.salt);
     if (shapeOf(B) !== def.shape) throw Object.assign(new Error('shape'), { shape: true });
   } catch (e) {
     if (e.shape) {
@@ -254,9 +262,10 @@ function ensureRegistered(wrapper, reg) {
   try {
     const baseProps = {};
     for (const [k, m] of Object.entries(propsMeta)) if (m.default !== undefined) baseProps[k] = m.default;
-    const rawElements = renderFn(fn, baseProps);      // tree A — the canonical definition render
+    const salt = djb2(title);                              // per-component id salt (see normalizeComponentIds)
+    const rawElements = renderFn(fn, baseProps, salt);     // tree A — the canonical definition render
     assertAtomicOnly(rawElements, title);
-    const def = { fn, title, propsMeta, baseProps, rawElements, shape: shapeOf(rawElements), map: {} };
+    const def = { fn, title, propsMeta, baseProps, rawElements, salt, shape: shapeOf(rawElements), map: {} };
 
     // sentinel-diff every declared prop, then wrap the landings + build the registry
     const props = {}; const groups = { items: {}, order: [] };
@@ -340,7 +349,7 @@ export function emitComponentInstance(wrapper, props = {}, children = []) {
   // component would produce — the override_value is read from the mapped (elementId, propKey).
   const overrides = [];
   if (passed.length) {
-    const E = renderFn(def.fn, { ...def.baseProps, ...Object.fromEntries(passed.map((k) => [k, props[k]])) });
+    const E = renderFn(def.fn, { ...def.baseProps, ...Object.fromEntries(passed.map((k) => [k, props[k]])) }, def.salt);
     if (shapeOf(E) !== def.shape) {
       throw new Error(`component "${title}": this invocation's props change the rendered structure — per-instance structure cannot vary; only declared settings props can`);
     }

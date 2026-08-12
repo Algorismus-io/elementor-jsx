@@ -435,9 +435,12 @@ export async function deployBundle(bundle, cfg = {}) {
                 continue;
               }
               rewriteComponentIds(u.local.elements, uidToId);
+              // `uid` re-stamps the deployed fingerprint: without it the target keeps the OLD uid
+              // and every later redeploy would re-detect "changed tree" and PUT again forever
+              // (live-found on the phase-2 E2E — the second identical deploy still reported updates).
               const res = await fetch(`${routes.ultra}/${u.id}/elements`, {
                 method: 'PUT', headers: chead,
-                body: JSON.stringify({ elements: u.local.elements, settings: u.local.settings }),
+                body: JSON.stringify({ elements: u.local.elements, settings: u.local.settings, uid: u.uid }),
               });
               if (res.status === 422) {
                 const body = await res.json().catch(async () => ({ code: 'unknown', message: await res.text().catch(() => '') }));

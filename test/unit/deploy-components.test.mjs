@@ -192,6 +192,7 @@ test('deploy: stale component + ultra available → PUT /components/{id}/element
   assert.ok(put.url.endsWith(`${ULTRA}/55/elements`));
   assert.ok(Array.isArray(put.body.elements) && put.body.elements.length, 'full tree in the body');
   assert.ok(put.body.settings.overridable_props.props.h1, 'registry rides along');
+  assert.equal(put.body.uid, local.uid, 'the NEW uid re-stamps the deployed fingerprint (else every redeploy re-PUTs)');
   // the PUT tree still carries the overridable envelope (definition shape, not a page tree)
   const head = allNodes(put.body.elements).find(byWidget('e-heading'));
   assert.equal(head.settings.title.$$type, 'overridable');

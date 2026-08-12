@@ -33,6 +33,17 @@
   same child prop. `rewriteComponentIds` rewrites the wrapped override's `schema_source` (the
   chain invariant: same id as `component_id`); `expandInstances` resolves chains
   (Overridable_Transformer parity — outer value rides to the inner key, `null` clears).
+- **Per-component id salt** (live-found on the E2E): component element ids are now
+  `c<djb2(title)><n>` instead of `c00000…`. Local-style ids embed the element id, so every
+  component previously shipped the SAME `.e-c00000-s` selectors in its own per-component CSS
+  file — on a page rendering two components the last-enqueued file won and one component stole
+  the other's box styles (seen: the nested parent rendering the child's background). Titles are
+  unique by validation, so the salt is too. Consequence: `treeHash` (a display-only drift
+  fingerprint) now moves when a component is retitled.
+- **uid re-stamp on update** (live-found on the E2E): the update PUT sends the new `uid`, so the
+  target's `_elementor_component_uid` tracks the tree it actually holds. Without it the deployed
+  uid stayed stale and EVERY later redeploy re-detected "changed tree" and PUT again; with it a
+  second identical deploy reports `reused` (verified live: updated → reused).
 
 **Components 1:1 (SPEC 2.0 — phase 1)** — `defineComponent(fn, {title, props})`: JSX components
 compile to NATIVE registered Elementor components (`elementor_component` CPT) with per-instance
