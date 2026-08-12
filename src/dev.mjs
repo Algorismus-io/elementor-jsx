@@ -22,7 +22,7 @@ import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import esbuild from 'esbuild';
 import { compileSite } from './compile.mjs';
-import { deployBundle } from './deploy.mjs';
+import { deployBundle, deployFailures } from './deploy.mjs';
 
 /** eu-studio's check gate, if installed as a package or sibling checkout — powers --gates. */
 function findStudioBin() {
@@ -91,7 +91,7 @@ es.onmessage=(e)=>{
   const m=JSON.parse(e.data);
   if(m.type==='building'){dot.className='dot busy';status.textContent='building…';}
   if(m.type==='reload'){dot.className='dot';overlay.className='overlay';status.textContent=m.note;try{frame.contentWindow.location.reload()}catch{frame.src=frame.src}}
-  if(m.type==='error'){dot.className='dot err';status.textContent='build failed';overlay.textContent=m.message;overlay.className='overlay on';}
+  if(m.type==='error'){dot.className='dot err';status.textContent=m.title||'build failed';overlay.textContent=m.message;overlay.className='overlay on';}
   if(m.type==='gate'){const g=document.getElementById('gate');g.style.display='inline-block';
     if(m.state==='running'){g.className='pill run';g.textContent='gates…'}
     else if(m.state==='pass'){g.className='pill pass';g.textContent='gates ✓ '+m.detail}
@@ -120,15 +120,32 @@ export async function dev(projectDir, { port = 4477, gates = false } = {}) {
       const bundle = await buildProject(dir);
       const sig = signature(bundle); // BEFORE deploy — see the mutation note above
       const { kitChanged, changedSlugs } = diffSig(prev, sig);
-      let note;
+      let note; let report = null;
       if (!kitChanged && changedSlugs.length === 0) {
         note = `no effective change (${Date.now() - t0}ms)`;
       } else if (kitChanged) {
-        await deployBundle(bundle, { fast: true });
+        report = await deployBundle(bundle, { fast: true });
         note = `full deploy (kit changed) · ${bundle.pages.length} page(s) · ${Date.now() - t0}ms`;
       } else {
-        await deployBundle(bundle, { fast: true, only: changedSlugs });
+        report = await deployBundle(bundle, { fast: true, only: changedSlugs });
         note = `deployed ${changedSlugs.join(', ')} · ${Date.now() - t0}ms`;
+      }
+      /* DEPLOY FAILURES ARE NOT EXCEPTIONS (field report 1.9.1): deployBundle records a rejected
+       * tree save as `action: 'ERR save 422: …'` on the page entry so one bad page can't abort the
+       * others — and v1.9.1's dev loop ignored the report entirely, printing "deployed" while the
+       * page never changed (twice in a row, with the validator's message nowhere on screen).
+       * A failed save must read exactly like a failed BUILD: red dot, the error in the overlay, a
+       * failing gates pill, and the full validator text in the dev log. `prev` is NOT advanced —
+       * the next save must retry this deploy rather than diff against a state that never landed. */
+      const failed = report ? deployFailures(report) : [];
+      if (failed.length) {
+        const msg = `deploy FAILED (${failed.length}) after ${Date.now() - t0}ms\n${failed.join('\n')}`;
+        send({ type: 'error', title: 'deploy failed', message: msg });
+        send({ type: 'gate', state: 'fail', pages: changedSlugs.join(', ') || 'all', detail: `deploy ${failed.length} error(s)` });
+        console.error(`[dev] ✖ ${msg}`);
+        busy = false;
+        if (queued) { queued = false; cycle('queued change'); }
+        return;
       }
       prev = sig;
       send({ type: 'reload', note: `${note} · ${reason}` });
@@ -166,7 +183,7 @@ export async function dev(projectDir, { port = 4477, gates = false } = {}) {
 
   // initial build + full deploy so the preview starts truthful
   await cycle('startup');
-  if (!prev) throw new Error('exjsx dev: initial build failed — fix the error above and rerun');
+  if (!prev) throw new Error('exjsx dev: the initial build/deploy failed — fix the error above and rerun');
 
   const server = createServer((req, res) => {
     if (req.url === '/events') {
@@ -184,11 +201,16 @@ export async function dev(projectDir, { port = 4477, gates = false } = {}) {
 
   // debounce: editors fire several events per save; bundle artifacts must not self-trigger
   let timer = null;
-  watch(dir, { recursive: true }, (_event, file) => {
+  const watcher = watch(dir, { recursive: true }, (_event, file) => {
     if (!file || !/\.(mjs|jsx|js|json)$/.test(file)) return;
     if (/bundle\.json$|media-map\.json$|node_modules/.test(file)) return;
     clearTimeout(timer);
     timer = setTimeout(() => cycle(file), 150);
   });
+  // the watcher and the debounce timer are what keep the process alive — closing the returned
+  // server must therefore stop them too, or `dev()` can never be shut down by its caller (tests,
+  // embedders) and node hangs after the last assertion.
+  server.on('close', () => { clearTimeout(timer); watcher.close(); });
+  server.watcher = watcher;
   return server;
 }

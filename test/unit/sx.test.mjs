@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sx, FLEX } from '../../src/kit/kit-components.mjs';
-import { S, C, N, SZ, DIM, M, RAD, BG, GRAD, SHADOW, HUG, AUTO } from '../../src/kit/kit.mjs';
+import { S, C, N, SZ, DIM, M, RAD, BG, GRAD, SHADOW, SHADOWS, HUG, AUTO } from '../../src/kit/kit.mjs';
 
 const VAR_REF = { $$type: 'global-color-variable', value: 'e-gv-abc1234', __lit: '#123456' };
 const FONT_REF = { $$type: 'global-font-variable', value: 'e-gv-def5678' };
@@ -186,4 +186,25 @@ test('sx: bgImage with bgOpts overrides size/position/repeat', () => {
   assert.equal(ov.size.value, 'contain');
   assert.equal(ov.position.value, 'top left');
   assert.equal(ov.repeat.value, 'repeat');
+});
+
+/* 1.9.2 field report #6 — the AUTHORING half of multi-layer shadows: `shadow` takes one spec
+ * tuple, an ARRAY of spec tuples, or a prebuilt envelope. Before this, layered elevation and
+ * pixel-stepped borders had no atomic form at all. */
+test('sx shadow: one spec tuple → SHADOW; an array of tuples → the multi-item SHADOWS envelope', () => {
+  assert.deepEqual(sx({ shadow: [8, 30, -12, 'rgba(0,0,0,.25)', 2] })['box-shadow'], SHADOW(8, 30, -12, 'rgba(0,0,0,.25)', 2));
+  const multi = sx({ shadow: [[0, 0, 0, '#111', 1], [0, 0, 0, '#111', 2]] })['box-shadow'];
+  assert.deepEqual(multi, SHADOWS([0, 0, 0, '#111', 1], [0, 0, 0, '#111', 2]));
+  assert.equal(multi.value.length, 2, 'ONE box-shadow envelope, two shadow items');
+});
+
+test('sx shadow: a prebuilt envelope passes through, and an empty array is a loud build error', () => {
+  const env = SHADOWS([1, 2, 3, '#000']);
+  assert.equal(sx({ shadow: env })['box-shadow'], env);
+  assert.throws(() => sx({ shadow: [] }), /empty array/);
+});
+
+test('sx shadow: boxShadow/box-shadow aliases reach the same array handling', () => {
+  assert.deepEqual(sx({ boxShadow: [[0, 0, 0, '#111', 1], [0, 0, 0, '#111', 2]] })['box-shadow'],
+    sx({ 'box-shadow': [[0, 0, 0, '#111', 1], [0, 0, 0, '#111', 2]] })['box-shadow']);
 });

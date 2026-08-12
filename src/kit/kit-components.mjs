@@ -12,7 +12,7 @@
  */
 import {
   node, css, freshId, stateVariant,
-  S, C, N, B, SZ, DIM, M, PDIM, P0, RAD, BG, GRAD, SHADOW, HUG, AUTO, HTML, LINK, CLS, IMG_ID, IMG_URL,
+  S, C, N, B, SZ, DIM, M, PDIM, P0, RAD, BG, GRAD, SHADOW, SHADOWS, HUG, AUTO, HTML, LINK, CLS, IMG_ID, IMG_URL,
   fx, col, row, grid, sect, heading, para, button, image, textLink, iconChip, faIcon,
 } from './kit.mjs';
 
@@ -125,6 +125,17 @@ function unalias(o) {
   }
   return out || o;
 }
+/* sx `shadow` — ONE layer as the arg tuple [v, blur, spread, color, h?, 'inset'?], an ARRAY OF
+ * TUPLES for a MULTI-LAYER shadow ([[…],[…]] → Box_Shadow_Prop_Type's item array, rendered as a
+ * comma list), or a prebuilt envelope. Multi-layer is what pixel-stepped "borders" and layered
+ * elevation need; before 1.9.2 they could only be written as raw CSS, and raw-atomic-overlap then
+ * warned on every such element (field report 1.9.1). */
+const shadowVal = (v) => {
+  if (!Array.isArray(v)) return v;                       // prebuilt {$$type:'box-shadow'} envelope
+  if (!v.length) throw new Error('sx shadow: empty array — pass [v, blur, spread, color] or [[…],[…]] for multiple layers');
+  return Array.isArray(v[0]) ? SHADOWS(...v) : SHADOW(...v);
+};
+
 /** '96px 24px' → [96, 24] for pad/m ('auto' preserved; unit tokens become size envelopes). */
 const boxVal = (v, prop) => (typeof v === 'string'
   ? v.trim().split(/\s+/).map((s) => {
@@ -271,7 +282,7 @@ export function sx(o = {}) {
   if (o.gridCols != null) { p.display = S('grid'); p['grid-template-columns'] = S(typeof o.gridCols === 'number' ? `repeat(${o.gridCols}, 1fr)` : o.gridCols); }
   if (o.gridRows != null) { p.display = S('grid'); p['grid-template-rows'] = S(typeof o.gridRows === 'number' ? `repeat(${o.gridRows}, 1fr)` : o.gridRows); }
   if (o.pos) p.position = S(o.pos);
-  if (o.shadow) p['box-shadow'] = Array.isArray(o.shadow) ? SHADOW(...o.shadow) : o.shadow;
+  if (o.shadow) p['box-shadow'] = shadowVal(o.shadow);
   if (o.fit) p['object-fit'] = S(o.fit);
   // border: [w, c] (both) · string (color, width 1) · number (width, color from borderColor or
   // currentColor). A bare number is a WIDTH like CSS `border:1px` — never a color; treating it as a

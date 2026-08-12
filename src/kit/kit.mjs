@@ -143,15 +143,32 @@ const GRAD_ = (angle, c1, c2) => ({
     },
   },
 });
-export const SHADOW = (v, blur, spread, color, h = 0) => ({
-  $$type: 'box-shadow',
-  value: [
-    {
-      $$type: 'shadow',
-      value: { hOffset: SZ(h), vOffset: SZ(v), blur: SZ(blur), spread: SZ(spread), color: C(color) },
+/* ONE shadow layer. `position` is the schema's only optional field, enum ['inset']
+ * (Shadow_Prop_Type 4.2.1); Shadow_Transformer joins hOffset vOffset blur spread color position. */
+const SHADOW_ITEM = (v, blur, spread, color, h = 0, position) => {
+  if (position != null && position !== 'inset') {
+    throw new Error(`SHADOW: position '${position}' — Shadow_Prop_Type's enum is 'inset' only (omit it for an outer shadow)`);
+  }
+  return {
+    $$type: 'shadow',
+    value: {
+      hOffset: SZ(h), vOffset: SZ(v), blur: SZ(blur), spread: SZ(spread), color: C(color),
+      ...(position ? { position: S(position) } : {}),
     },
-  ],
+  };
+};
+export const SHADOW = (v, blur, spread, color, h = 0, position) => ({
+  $$type: 'box-shadow',
+  value: [SHADOW_ITEM(v, blur, spread, color, h, position)],
 });
+/**
+ * MULTI-LAYER box-shadow — Box_Shadow_Prop_Type is an ARRAY of Shadow_Prop_Type items (schema
+ * verified 4.2.1), rendered as a comma-separated CSS list, so layered elevation and pixel-stepped
+ * "borders" (`SHADOWS([0,0,0,'#000',1],[0,0,0,'#000',2],…)`) are fully atomic. Before 1.9.2 the
+ * only route was raw CSS, which raw-atomic-overlap then flagged on every such element (field
+ * report 1.9.1). Each spec is the SHADOW arg tuple: [v, blur, spread, color, h?, 'inset'?].
+ */
+export const SHADOWS = (...specs) => ({ $$type: 'box-shadow', value: specs.map((s) => SHADOW_ITEM(...s)) });
 /** Hug width — containers default to width:100%; use this on any container child of a flex ROW. */
 export const HUG = { $$type: 'size', value: { unit: 'custom', size: 'fit-content' } };
 export const AUTO = { $$type: 'size', value: { unit: 'auto', size: null } };

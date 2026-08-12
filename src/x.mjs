@@ -15,7 +15,7 @@
  *   kit-components.mjs: CInc          — internal instance counter
  */
 export {
-  S, C, N, B, SZ, DIM, P0, M, PDIM, RAD, RADT, RADB, BG, GRAD, SHADOW, HUG, AUTO, HTML, LINK,
+  S, C, N, B, SZ, DIM, P0, M, PDIM, RAD, RADT, RADB, BG, GRAD, SHADOW, SHADOWS, HUG, AUTO, HTML, LINK,
   CLS, IMG_ID, IMG_URL, SVG_ID, CUSTOM_CSS, VIDEO_URL, VIDEO_ID, KV, EMAIL_ACTION, TRACKS, GAPXY,
   node, css, clone, fx, assertTree, emit, col, row, grid, nativeGrid, hugRow, hugCol, bar, hero,
   hamburgerNav, sect, abs, archConvex, archConcave, heading, para, button, image, imageUrl,

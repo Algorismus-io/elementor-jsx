@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  S, C, N, B, SZ, DIM, M, P0, RAD, RADT, RADB, BG, GRAD, SHADOW,
+  S, C, N, B, SZ, DIM, M, P0, RAD, RADT, RADB, BG, GRAD, SHADOW, SHADOWS,
   HUG, AUTO, HTML, LINK, CLS, IMG_ID, SVG_ID, CUSTOM_CSS,
 } from '../../src/kit/kit.mjs';
 
@@ -84,6 +84,27 @@ test('SHADOW: single-shadow array with h/v/blur/spread/color', () => {
   assert.deepEqual(sh.value[0].value, {
     hOffset: SZ(2), vOffset: SZ(8), blur: SZ(30), spread: SZ(-12), color: C('rgba(0,0,0,.25)'),
   });
+});
+
+/* 1.9.2 field report #6: pixel-stepped borders need a MULTI-layer box-shadow, which the sx layer
+ * could not express — so every such element fell back to raw CSS and raw-atomic-overlap warned on
+ * it. Box_Shadow_Prop_Type is an ARRAY of Shadow_Prop_Type items (schema-verified 4.2.1), so the
+ * envelope is one box-shadow carrying N shadow items — NOT N box-shadow envelopes. */
+test('SHADOWS: multi-layer box-shadow is ONE envelope carrying N shadow items (pixel-stepped border)', () => {
+  const sh = SHADOWS([0, 0, 0, '#111', 1], [0, 0, 0, '#111', 2], [0, 0, 0, '#111', 3]);
+  assert.equal(sh.$$type, 'box-shadow');
+  assert.equal(sh.value.length, 3);
+  assert.ok(sh.value.every((it) => it.$$type === 'shadow'));
+  assert.deepEqual(sh.value.map((it) => it.value.hOffset), [SZ(1), SZ(2), SZ(3)]);
+  assert.deepEqual(sh.value[2].value, { hOffset: SZ(3), vOffset: SZ(0), blur: SZ(0), spread: SZ(0), color: C('#111') });
+  // one layer through SHADOWS ≡ SHADOW (same item shape — the transformer joins the same fields)
+  assert.deepEqual(SHADOWS([8, 30, -12, '#000', 2]), SHADOW(8, 30, -12, '#000', 2));
+});
+
+test('SHADOW: optional position rides the schema enum (inset only)', () => {
+  assert.deepEqual(SHADOW(0, 10, 0, '#000', 0, 'inset').value[0].value.position, S('inset'));
+  assert.equal(SHADOW(0, 10, 0, '#000').value[0].value.position, undefined, 'omitted for an outer shadow');
+  assert.throws(() => SHADOW(0, 10, 0, '#000', 0, 'outset'), /enum is 'inset' only/);
 });
 
 test('HUG / AUTO: keyword size envelopes', () => {
