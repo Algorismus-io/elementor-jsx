@@ -148,11 +148,19 @@ export const PriceCard = defineComponent(
   prop (multi-target = error); no structure-changing props (conditionals); no children on
   instances; atomic-only trees (**no `<html>`/navBar/browserMock inside** — classic widgets);
   no cycles; ≤100 components; unique titles; title 2..200 chars.
-- Deploy: components create BEFORE pages; bundles stay uid-keyed (per-site ids rewritten in).
-  **No active Pro (403) → WARN + inline expansion for that deploy — pages render identically,
-  just not linked.** Redeploy: unchanged components are reused by uid; a CHANGED component
-  WARNS and keeps the deployed tree (native update path = phase 2; force now: archive the
-  component in Elementor, redeploy).
+- **Composition + prop forwarding (phase 2)**: a registered component may nest another and forward
+  its own props into the child (`({plan}) => <Child headline={plan}/>`) — compiles to the native
+  `overridable(override)` chain envelope (editor resolve-overrides-chain semantics); the forwarded
+  prop needs a DEFAULT (its baseline). One forwarded prop feeds exactly ONE child prop.
+- Deploy route ladder (phase 2): components create BEFORE pages; bundles stay uid-keyed (per-site
+  ids rewritten in). Native `elementor/v1/components` first (needs ACTIVE Pro); **on 403 → the
+  ultra-mcp plugin's `elementor-ultra/v1/components` controller (free-tier path, same validators
+  server-side); neither → WARN + inline expansion for that deploy — pages render identically,
+  just not linked.** Redeploy: unchanged components are reused by uid; a CHANGED component is
+  UPDATED in place via `PUT elementor-ultra/v1/components/{id}/elements` when the ultra route
+  exists — with only the native route it WARNS and keeps the deployed tree (force now: archive
+  the component in Elementor, redeploy). Sites without the module 501 with the experiments named
+  (`e_components` + `e_atomic_elements`).
 
 ## sx style props (on any intrinsic / box())
 
