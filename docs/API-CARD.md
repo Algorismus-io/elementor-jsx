@@ -100,6 +100,14 @@ through verbatim (the decompile round-trip). NOT valid on `<html>` (classic widg
 - **Save semantics**: the server silently STRIPS invalid items (no error, the animation just
   never runs); `exjsx lint` mirrors validation.php exactly (`invalid-interaction`, error) — trust
   the lint, not the save.
+- **Horizontal slide = REAL page overflow (lint warns — `horizontal-slide-overflow`)**: a slide
+  interaction PARKS the element at its off-canvas start offset until the trigger fires. For
+  `direction: 'left'|'right'` that offset is on the X axis, which the document scrolls — the page
+  is genuinely wider than the viewport (a gate caught `scrollWidth 442` at a 390px viewport), and
+  it never resolves if the trigger doesn't fire (reduced motion, below the fold, JS blocked).
+  Prefer `direction: 'top'|'bottom'` (Y is what the document already scrolls) or `effect: 'fade'`
+  / `'scale'`; if the horizontal motion IS the design, clip it on the PARENT:
+  `<box raw="overflow-x:clip;">` (or `overflow:hidden`) around the sliding element.
 - **Reduced motion (our a11y value-add — native Elementor ignores it)**: every compiled tree with
   interactions gets a tiny guard that blanks the interactions JSON when
   `prefers-reduced-motion: reduce` matches (elements render at final state). Opt out:
@@ -177,7 +185,12 @@ justify = center|start|end|flex-start|flex-end|space-between/around/evenly|stret
 `color bg` (hex — NOT gradient strings) · `bgImage` (url|id) `bgOpts`
 (`{color, size:'cover', position:'center center', repeat:'no-repeat', attachment}`) · `grad` (**array `[angle, from, to]`**,
 e.g. `grad={[135,'#0ff','#f0f']}` — a CSS gradient STRING throws; freeform gradients go in `raw="background-image:…;"`) ·
-`border` (`[w,'#color']` — bare number = width!) · `borderColor radius shadow` ·
+`border` (`[w,'#color']` — bare number = width!) · `borderColor radius` ·
+`shadow` — ONE layer `[v, blur, spread, color, h?, 'inset'?]`, or an **array of layers**
+`shadow={[[0,0,0,'#000',1],[0,0,0,'#000',2]]}` → the multi-item `box-shadow` envelope
+(`Box_Shadow_Prop_Type` is an ARRAY of shadow items; renders as the comma list). Layered
+elevation and pixel-stepped "borders" are therefore ATOMIC — they no longer need raw CSS
+(kit: `SHADOW(...)` / `SHADOWS(spec, spec, …)`) ·
 `size weight font lh ls ta` (bare-number `lh`≤4 and `ls` read as EM — `ls={-1}` collapses a headline;
 explicit units are honored: `lh="150%"`, `ls="2px"`) ·
 `z`/`zIndex` · `fit` (object-fit) · `tablet={{…}} mobile={{…}}` (breakpoint overrides) · `sx={{…}}` (merge extra) · `props` (raw envelopes).

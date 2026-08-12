@@ -12,7 +12,7 @@ import { defineSite } from '../../src/site.mjs';
 import { h, renderPage } from '../../src/runtime.mjs';
 import { defineComponent, rewriteComponentIds, expandInstances } from '../../src/component.mjs';
 import { planComponents } from '../../src/deploy.mjs';
-import { button } from '../../src/kit/kit.mjs';
+import { button, node, image, IMG_ID } from '../../src/kit/kit.mjs';
 import { stable, djb2 } from '../../src/classes.mjs';
 import { resetIds, allNodes, findNode, byWidget, textOf, collectIds } from '../helpers.mjs';
 
@@ -191,10 +191,66 @@ test('components: classic html widget inside a component is a build error naming
     { title: 'Navish', props: {} });
   assert.throws(() => compileSite(site(page('a', h(C, {})))), (e) => {
     assert.match(e.message, /component "Navish"/);
-    assert.match(e.message, /classic widget "html"/);
+    assert.match(e.message, /non-atomic element "html"/);
+    assert.match(e.message, /CLASSIC widget/);
     assert.match(e.message, /non_atomic_element_in_component/);
     return true;
   });
+});
+
+/* 1.9.2 field report #5: the v1 check only looked at elType === 'widget', so a NON-widget
+ * non-atomic node (a V3 container, an <details>-carrying raw element) reached POST /components
+ * and 422'd there. Non_Atomic_Widget_Validator keys off (widgetType ?? elType), and this mirrors it. */
+test('components: a non-atomic ELEMENT type (V3 container) is a build error, not a server 422', () => {
+  const C = defineComponent(() => h('box', { pad: 0 }, node('container', { children: [] })),
+    { title: 'LegacyBox', props: {} });
+  assert.throws(() => compileSite(site(page('a', h(C, {})))), (e) => {
+    assert.match(e.message, /component "LegacyBox"/);
+    assert.match(e.message, /non-atomic element "container"/);
+    assert.match(e.message, /V3\/legacy container/);
+    assert.match(e.message, /non_atomic_element_in_component/);
+    return true;
+  });
+});
+
+test('components: <details> markup rides the classic html widget — the error names it and says why', () => {
+  const C = defineComponent(() => h('box', { pad: 0 },
+    h('html', { raw: '<details><summary>Q</summary><p>A</p></details>' })), { title: 'FaqDrop', props: {} });
+  assert.throws(() => compileSite(site(page('a', h(C, {})))), /<details>\/<summary>/);
+});
+
+/* 1.9.2 field report #3: an image/attachment prop cannot be a per-instance override. Two landings,
+ * one honest message: IMG_URL VALIDATES its argument (the sentinel render died inside the builder
+ * with a URL riddle), IMG_ID does NOT (the sentinel landed inside the image envelope and mapped). */
+test('components: an image-URL prop fails the BUILD with the media rule, not IMG_URL\'s riddle', () => {
+  const C = defineComponent(({ src }) => h('box', { pad: 0 }, h('img', { src, alt: 'x' })),
+    { title: 'PicCard', props: { src: { label: 'Image', default: 'https://example.com/a.png' } } });
+  assert.throws(() => compileSite(site(page('a', h(C, { src: 'https://example.com/b.png' })))), (e) => {
+    assert.match(e.message, /component "PicCard": prop "src" feeds an IMAGE\/media value/);
+    assert.match(e.message, /IMG_URL/);                       // the builder is named, as a breadcrumb
+    assert.match(e.message, /one registered component per image/);
+    assert.doesNotMatch(e.message, /ABSOLUTE http/);          // NOT the raw builder error
+    return true;
+  });
+});
+
+test('components: an attachment-id image prop is caught on the ENVELOPE (IMG_ID never validates)', () => {
+  const C = defineComponent(({ pic }) => h('box', { pad: 0 }, image(IMG_ID(pic))),
+    { title: 'IdPicCard', props: { pic: { label: 'Picture', default: 7 } } });
+  assert.throws(() => compileSite(site(page('a', h(C, { pic: 9 })))), (e) => {
+    assert.match(e.message, /component "IdPicCard": prop "pic" feeds an IMAGE\/media value/);
+    assert.match(e.message, /<e-image>\.image is a image envelope/);
+    return true;
+  });
+});
+
+test('components: a TEXT prop next to a fixed image still maps cleanly (the blessed workaround)', () => {
+  const C = defineComponent(({ caption = 'Alt copy' }) => h('box', { pad: 0 },
+    h('img', { src: 'https://example.com/fixed.png', alt: 'fixed' }),
+    h('text', {}, caption)), { title: 'FixedPic', props: { caption: { label: 'Caption' } } });
+  const b = compileSite(site(page('a', h(C, { caption: 'Hello' }))));
+  assert.equal(Object.keys(b.components[0].settings.overridable_props.props).length, 1);
+  assert.equal(b.components[0].settings.overridable_props.props.caption.propKey, 'paragraph');
 });
 
 test('components: circular composition is a build error naming the cycle', () => {

@@ -63,6 +63,39 @@ const ATOMIC_DECLS = new Set([
 ]);
 const GENERIC_FONT = /-apple-system|system-ui|BlinkMacSystemFont|sans-serif|serif|monospace|ui-sans|ui-serif|ui-mono/i;
 
+/* CSS the sx vocabulary genuinely CANNOT emit — raw is the only route, so raw-atomic-overlap must
+ * stay quiet about it. Size envelopes are {unit, number}: no calc()/clamp()/min()/max()/env(), and
+ * no var() outside the colour props (where C() passes var(--x) through). Atomic props also carry
+ * no priority, and background is ONE layer (a colour, a two-stop gradient or one image). */
+const CSS_FN = /\b(calc|clamp|min|max|env|attr)\s*\(/;
+const COLOR_DECL = new Set(['color', 'background', 'background-color']);
+export function inexpressibleBySx(decl, rawValue) {
+  const value = String(rawValue || '').trim();
+  if (/!important/i.test(value)) return true;
+  if (CSS_FN.test(value)) return true;
+  if (/\bvar\s*\(/.test(value) && !COLOR_DECL.has(decl)) return true;
+  // background: multiple comma-separated layers, or an image shorthand sx has no key for
+  if (decl === 'background' && (value.includes(',') && !/^(linear|radial|conic)-gradient\(/.test(value))) return true;
+  if (decl === 'background' && /\burl\s*\(/.test(value) && /\s(no-repeat|repeat|cover|contain|center|top|bottom|left|right)\b/.test(value)) return true;
+  return false;
+}
+
+/* Atomic element types that only exist with Elementor Pro installed AND active. Free core
+ * registers `e-form` (the container) but NONE of the field widgets or the status messages — they
+ * ride the `e_pro_atomic_form` experiment, which ships with Pro. Deploying them to a free site
+ * fails validation per element ("Unknown type … is not registered on this site"). */
+const PRO_FORM = 'Elementor Pro (atomic forms — the e_pro_atomic_form experiment ships with Pro)';
+export const PRO_ONLY_TYPES = {
+  'e-form-input': PRO_FORM,
+  'e-form-textarea': PRO_FORM,
+  'e-form-select': PRO_FORM,
+  'e-form-checkbox': PRO_FORM,
+  'e-form-label': PRO_FORM,
+  'e-form-submit-button': PRO_FORM,
+  'e-form-success-message': PRO_FORM,
+  'e-form-error-message': PRO_FORM,
+};
+
 /* Envelope validity: a $$type envelope whose value can't be what the schema demands ships a
  * silent 400 (or renders nothing). Incident: grad="linear-gradient(…)" string-spread into
  * GRAD('l','i','n') — angle 'l' sailed through to the server and died there; bg:"linear-gradient"
@@ -391,13 +424,77 @@ const RULES = [
     },
   },
   {
+    /* A declaration only "overlaps" atomic props when the sx layer can actually EXPRESS ITS VALUE.
+     * v1.9.1 matched on the property name alone, so every pixel-stepped border (a multi-layer
+     * box-shadow, the only way to draw one) warned on every element that used it — noise the
+     * field report flagged as a false positive. Two halves of the fix: multi-layer shadows are now
+     * atomic (sx `shadow: [[…],[…]]` → Box_Shadow_Prop_Type's item array), so THOSE warnings are
+     * now true and actionable; and values the sx vocabulary genuinely cannot emit — CSS functions
+     * in a size (sx sizes are unit+number), !important, multi-layer/url backgrounds — stop
+     * warning, because raw is the only route for them and the author has no fix to apply. */
     id: 'raw-atomic-overlap', severity: 'warn',
     run(bundle) {
       const out = [];
       for (const { owner, css } of allCustomCss(bundle)) {
         if (css.includes('&') || css.includes('@')) continue;   // nested/pseudo/media rules are exactly what raw is FOR
-        const overlap = [...css.matchAll(/(?:^|;|\s)([a-z-]+)\s*:/g)].map((m) => m[1]).filter((d) => ATOMIC_DECLS.has(d));
-        if (overlap.length) out.push(F(this.id, this.severity, owner, `raw CSS sets [${[...new Set(overlap)].join(', ')}] which atomic props cover — raw only renders via global classes (or --inline)`, 'move these to tw/sx props; keep raw for nested selectors, pseudo-classes and non-atomic CSS'));
+        const overlap = [];
+        for (const m of css.matchAll(/(?:^|;|\{)\s*([a-z-]+)\s*:([^;}]*)/g)) {
+          const [, decl, value] = m;
+          if (ATOMIC_DECLS.has(decl) && !inexpressibleBySx(decl, value)) overlap.push(decl);
+        }
+        if (overlap.length) {
+          out.push(F(this.id, this.severity, owner, `raw CSS sets [${[...new Set(overlap)].join(', ')}] which atomic props cover — raw only renders via global classes (or --inline)`,
+            `move these to tw/sx props (multi-layer shadows included: shadow={[[v,blur,spread,color,h],[…]]}); keep raw for nested selectors, pseudo-classes and values sx can't express (calc()/clamp(), !important, layered backgrounds)`));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    /* PRO-ONLY ELEMENTS (field report 1.9.1, the orphan-page incident): a page using form()/field()
+     * emits e-form-* widgets that free Elementor does NOT register. lint passed clean, the deploy
+     * 422'd with 11 "Unknown type" errors, and the half-created pages were left behind.
+     * lint is OFFLINE — it cannot know the deploy target — so this is a WARN, not an error; the
+     * hard gate lives in deploy (capability probe against the site's registered element types,
+     * run before ANY post is created). This rule exists so the risk is visible while authoring. */
+    id: 'pro-only-element', severity: 'warn',
+    run(bundle) {
+      const hits = new Map();
+      const scan = (owner, elements) => {
+        for (const { n } of walk(elements)) {
+          const t = n.widgetType ?? n.elType;
+          if (!PRO_ONLY_TYPES[t]) continue;
+          if (!hits.has(t)) hits.set(t, { owner, count: 0 });
+          hits.get(t).count++;
+        }
+      };
+      for (const page of pagesAndParts(bundle)) scan(`${page.slug ?? page.type}`, page.elements);
+      for (const c of bundle.components || []) scan(`component "${c.title}"`, c.elements);
+      return [...hits].map(([t, { owner, count }]) => F(this.id, this.severity, owner,
+        `<${t}> × ${count} needs ${PRO_ONLY_TYPES[t]} — free Elementor does not REGISTER this type, so a deploy to a free site fails validation ("Unknown type ${t} is not registered on this site")`,
+        'lint is offline and cannot see the deploy target — deploy probes the site and fails before creating anything. For free targets, replace the form with a third-party embed (<html raw>) or a link to a hosted form'));
+    },
+  },
+  {
+    /* HORIZONTAL SLIDE = REAL DOCUMENT OVERFLOW (field report 1.9.1: a gate caught scrollWidth 442
+     * at a 390px viewport). A slide interaction PARKS the element at its off-canvas start offset
+     * until the trigger fires; for left/right that offset is along the X axis, which the document
+     * scrolls — so the page is genuinely wider than the viewport until the animation runs (and
+     * forever if the trigger never fires, e.g. reduced-motion, below-fold, JS blocked).
+     * Vertical slide parks along Y where body overflow is expected anyway. */
+    id: 'horizontal-slide-overflow', severity: 'warn',
+    run(bundle) {
+      const out = [];
+      for (const { owner, items } of allInteractions(bundle)) {
+        items.forEach((item, i) => {
+          const av = item?.value?.animation?.value;
+          if (av?.effect?.value !== 'slide') return;
+          const dir = av.direction?.value;
+          if (typeof dir !== 'string' || !/left|right/.test(dir)) return;
+          out.push(F(this.id, this.severity, `${owner} items[${i}]`,
+            `slide direction '${dir}' parks the element OFF-CANVAS on the X axis until the trigger fires — that is real document overflow (a horizontal scrollbar / scrollWidth > viewport, and it never resolves if the trigger doesn't fire: reduced motion, below the fold, JS blocked)`,
+            "use direction 'top'/'bottom' (Y overflow is what the document already scrolls) or effect 'fade'/'scale'; if the horizontal motion is the point, give the element's PARENT raw=\"overflow-x:clip;\" (or overflow:hidden) so the off-canvas start is clipped"));
+        });
       }
       return out;
     },

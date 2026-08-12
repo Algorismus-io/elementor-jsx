@@ -2,6 +2,65 @@
 
 ## Unreleased
 
+**1.9.2 field report — seven defects from two recorded builds on 1.9.1.**
+
+- **Pro form helpers no longer strand orphan pages (HIGHEST)** — `form()/field()/formSubmit()/
+  formSuccess()` emit `e-form-input/-label/-textarea/-submit-button/-success-message/-error-message`,
+  none of which FREE Elementor registers (they ride the Pro-only `e_pro_atomic_form` experiment).
+  `lint` passed clean, then the deploy created the post, 422'd the tree save with 11 "Unknown type
+  … is not registered on this site" errors, and LEFT THE POST BEHIND — the retry made a second.
+  Both halves fixed:
+  - **Capability gate** (`deploy.mjs` step 0b): the `/site/capabilities` probe is now fetched
+    unconditionally (it already supplied the Elementor version) and its `registered_types` is
+    checked against every element type the bundle would ship — pages (post `--only` filtering),
+    parts and component trees — BEFORE the kit write and before any post is created. Missing types
+    abort with a message naming each type, its count, where it first appears, the Pro/experiment
+    requirement and the free-target workaround. `widget` (the wrapper elType) and `e-component`
+    (its own native → ultra → inline-expansion ladder) are exempt; a site that cannot report
+    `registered_types` SKIPS the gate rather than blocking. Escape hatch: `--allow-unregistered`.
+    New pure exports: `bundleElementTypes`, `unregisteredTypes`, `capabilityError`.
+  - **Deploy atomicity**: create + tree-save is ONE logical operation — a failed save now DELETEs
+    the just-created post (`?force=true`, so a retry sees a free slug), reported as
+    `report.orphansRolledBack`. An EXISTING page is never deleted; it keeps its previous tree.
+  - `lint` gained **`pro-only-element`** (warn): lint is OFFLINE and cannot know the target, so it
+    flags the risk and points at the deploy gate, which is where the hard failure belongs.
+- **`exjsx dev` no longer swallows deploy 422s** (`dev.mjs`) — deployBundle records a rejected save
+  as `action:'ERR save …'` on the page entry (one bad page must not abort the rest) and the dev
+  loop dropped the report, printing "deployed" over two consecutive failures. A failed save now
+  reads exactly like a failed BUILD: `error` frame (red dot + overlay, titled `deploy failed`, not
+  `build failed`), a FAILING gates pill, the full validator text in the dev log, and `prev` NOT
+  advanced so the next save retries. New shared reader `deployFailures(report)`; the `deploy` CLI
+  verb uses it too and now **exits 1** on per-page failures instead of reporting success.
+  `summarizeSaveError` lifts `data.errors[]` (the element ids + failing settings keys) out of the
+  raw body — the old 100-char slice truncated exactly the actionable part. `dev()` now returns a
+  server whose `close()` also stops the fs watcher.
+- **`defineComponent` image props fail the BUILD with the real reason** (`component.mjs`) — a media
+  prop cannot be a per-instance override (Elementor resolves component media once; the override
+  envelope carries settings scalars, and an image rides a site-local attachment id or a validated
+  absolute URL). Both landings are caught: the sentinel dying inside a validating builder
+  (`IMG_URL`'s "needs an ABSOLUTE http(s) URL" riddle) and the attachment-id path where the
+  sentinel lands INSIDE the image envelope and used to map to a nonsense target. The message names
+  the three workarounds. Any other build-time-validated prop gets the generic sibling error.
+- **`horizontal-slide-overflow` lint rule** (warn) — `motion={{effect:'slide', direction:'left'|
+  'right'}}` parks the element off-canvas on the X axis until the trigger fires: real document
+  overflow (a gate caught `scrollWidth 442` at 390px) that never resolves if the trigger doesn't
+  fire (reduced motion, below the fold, JS blocked). Suggests vertical/fade/scale or an
+  `overflow-x:clip` parent. Documented in the API card's Motion section.
+- **Non-atomic elements inside `defineComponent`** (`component.mjs`) — the check only looked at
+  `elType === 'widget'`, so a V3 container (`container`/`section`/`column`) or any other non-`e-`
+  node reached `POST /components` and 422'd there. It now mirrors Elementor's
+  `Non_Atomic_Widget_Validator` exactly (identity = `widgetType ?? elType`), names the offender and
+  its path, and distinguishes classic widgets (incl. `<html raw>` carrying `<details>`/`<summary>`)
+  from legacy containers.
+- **Multi-layer shadows are atomic; `raw-atomic-overlap` stops crying wolf** — `Box_Shadow_Prop_Type`
+  is an ARRAY of shadow items, so **`shadow` now accepts an array of specs**:
+  `shadow={[[v,blur,spread,color,h],[…]]}` → one `box-shadow` envelope with N `shadow` items
+  (pixel-stepped "borders", layered elevation). `SHADOW(...)` gained the schema's optional 6th arg
+  `'inset'`; new kit/barrel export `SHADOWS(...specs)`. The lint rule now checks the VALUE, not just
+  the property name: declarations the sx layer genuinely cannot emit (CSS functions in a size,
+  `!important`, `var()` outside colour props, layered/url backgrounds — `inexpressibleBySx`) no
+  longer warn, and the fix text names the shadow-array form.
+
 **Components 1:1 (SPEC 2.0 — phase 2)** — the free-tier + update deploy path and prop forwarding:
 - **Deploy route ladder** (`deploy.mjs`): native `POST /elementor/v1/components` first; on 403
   `insufficient_permissions` (no ACTIVE Pro) or 404 the phase escalates ONCE to the ultra-mcp

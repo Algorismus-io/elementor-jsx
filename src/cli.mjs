@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compileSite } from './compile.mjs';
-import { deployBundle, shouldWriteVariables } from './deploy.mjs';
+import { deployBundle, shouldWriteVariables, deployFailures } from './deploy.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const [cmd, arg, arg2] = process.argv.slice(2);
@@ -74,6 +74,8 @@ async function build(entry) {
     const force = process.argv.includes('--force');
     const fast = process.argv.includes('--fast');
     const ownClasses = process.argv.includes('--own-classes');
+    // escape hatch for the capability gate (deploy.mjs step 0b) — deploy anyway and let the site 422
+    const allowUnregistered = process.argv.includes('--allow-unregistered');
     // --only=a,b OR --only a,b (value = next token, must exist and not be a flag)
     let only;
     const onlyEq = process.argv.find((a) => a.startsWith('--only='));
@@ -87,7 +89,7 @@ async function build(entry) {
       }
     }
     const bundle = JSON.parse(readFileSync(resolve(arg), 'utf8'));
-    const r = await deployBundle(bundle, { dry, force, only, fast, ownClasses });
+    const r = await deployBundle(bundle, { dry, force, only, fast, ownClasses, allowUnregistered });
     // --only warnings (class-registry lag) surface in BOTH dry and real mode, on stderr
     for (const w of r.warnings || []) console.error(`WARN: ${w}`);
     if (dry) {
@@ -111,6 +113,14 @@ async function build(entry) {
       r.pages.forEach((p) => console.log(`  ${p.action} "${p.title}" → id ${p.id} (/${p.slug}/)`));
       const drifted = r.pages.filter((p) => p.action === 'skipped-drifted');
       if (drifted.length) console.error(`⚠ ${drifted.length} page(s) SKIPPED (drifted — hand-edited outside exjsx): ${drifted.map((p) => `/${p.slug}/`).join(', ')}. Re-run with --force to overwrite.`);
+      // per-page save failures are REPORTED, not thrown (one bad page must not abort the rest) —
+      // so the command has to fail on them explicitly, or CI/`watch --deploy` reads a clean exit.
+      const failed = deployFailures(r);
+      if (failed.length) {
+        console.error(`✖ deploy FAILED for ${failed.length} target(s):`);
+        for (const f of failed) console.error(`  ${f}`);
+        process.exitCode = 1;
+      }
     }
   } else if (cmd === 'watch') {
     // exjsx watch <entry.jsx> [--deploy] — rebuild on change; optional auto-deploy of the bundle.
@@ -267,5 +277,5 @@ export default ({ theme: t }) => (
     const { readFileSync: rf } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     console.log(rf(join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'API-CARD.md'), 'utf8'));
-  } else console.log('usage: exjsx init [dir] | api | build <entry.jsx|project-dir> [out.json] [--inline] | deploy <bundle.json> [--dry] [--only <slug[,slug]>] [--force] | lint <entry.jsx|bundle.json> [--strict] | import <url-or-html-file> --out <file>.page.jsx [--name <slug>] | media <manifest.mjs> [map.json] | decompile <tree.json> [out.jsx] | inspect <bundle.json> [--page <slug>] [--el <id>]');
+  } else console.log('usage: exjsx init [dir] | api | build <entry.jsx|project-dir> [out.json] [--inline] | deploy <bundle.json> [--dry] [--only <slug[,slug]>] [--force] [--allow-unregistered] | lint <entry.jsx|bundle.json> [--strict] | import <url-or-html-file> --out <file>.page.jsx [--name <slug>] | media <manifest.mjs> [map.json] | decompile <tree.json> [out.jsx] | inspect <bundle.json> [--page <slug>] [--el <id>]');
 })().catch((e) => { console.error(e.message); process.exit(1); });

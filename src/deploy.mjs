@@ -10,6 +10,9 @@ import { join } from 'node:path';
 import { canonicalHash, decideDrift, shortHash } from './drift.mjs';
 import { rewriteComponentIds, expandInstances, referencedComponentUids } from './component.mjs';
 import { normalizeIds } from './compile.mjs';
+// Pro-only atomic types, shared with lint.mjs's OFFLINE pro-only-element warning: lint cannot know
+// the deploy target, this module can — so the hard gate lives here and the lint rule only flags risk.
+import { PRO_ONLY_TYPES } from './lint.mjs';
 
 // opts spread lets drift reads raise maxBuffer (execFileSync defaults to 1 MiB — too small for _elementor_data)
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
@@ -84,6 +87,106 @@ export function adaptSpansForVersion(bundle, version) {
   // adaptation or POST /components 422s (border-radius-v2 on 4.2.1; field-found on the phase-1 E2E)
   for (const c of bundle.components || []) walkEls(c.elements);
   return major >= 4.2 ? 'string (4.2+)' : 'number (4.1)';
+}
+
+/* ─────────────────────── capability gate (field report 1.9.1, HIGHEST) ───────────────────────
+ * A project using form()/field()/formSubmit() emits e-form-input / e-form-label / e-form-textarea /
+ * e-form-submit-button / e-form-success-message / e-form-error-message. Free Elementor registers
+ * NONE of them (they ride the Pro-only e_pro_atomic_form experiment). `exjsx lint` is offline and
+ * passed clean; the deploy then created the post, 422'd the tree save with 11 "Unknown type … is
+ * not registered on this site" errors, and LEFT THE EMPTY POST BEHIND — a retry created a second.
+ * Both halves are fixed here: this probe fails BEFORE any post is created, and the page loop
+ * deletes a just-created post whose tree save fails (see `orphan cleanup` below).
+ *
+ * Types deliberately NOT gated:
+ *   'widget'      — the wrapper elType; the real identity is widgetType.
+ *   'e-component' — instances have their own route ladder (native → ultra → INLINE EXPANSION), so
+ *                   a target without the components module still deploys correctly.
+ * Container-only elTypes that a site legitimately lacks would otherwise be un-deployable, so the
+ * probe is strictly "the site told us its registry and this type is absent". */
+const CAP_EXEMPT = new Set(['widget', 'e-component']);
+
+/** PURE: Map<type, {count, where}> of every element type a bundle's trees would ship. */
+export function bundleElementTypes(bundle, trees) {
+  const seen = new Map();
+  const scan = (where, elements) => {
+    (function w(ns) {
+      for (const n of ns || []) {
+        const t = n.widgetType ?? n.elType;
+        if (t && !CAP_EXEMPT.has(t)) {
+          const hit = seen.get(t) || { count: 0, where };
+          hit.count++;
+          seen.set(t, hit);
+        }
+        w(n.elements);
+      }
+    })(elements);
+  };
+  for (const p of trees?.pages ?? bundle.pages ?? []) scan(`page /${p.slug ?? ''}/`, p.elements);
+  for (const p of trees?.parts ?? bundle.parts ?? []) scan(`part ${p.type}`, p.elements);
+  for (const c of bundle.components || []) scan(`component "${c.title}"`, c.elements);
+  return seen;
+}
+
+/** PURE: which of a bundle's element types the target does NOT register. `registered` is the
+ * capabilities payload's `registered_types` ({elements:[…], widgets:[…]}); a missing/!malformed
+ * payload returns null (= "site could not be probed", the caller then skips the gate). */
+export function unregisteredTypes(bundle, registered, trees) {
+  const els = registered?.elements, wids = registered?.widgets;
+  if (!Array.isArray(els) || !Array.isArray(wids)) return null;
+  const known = new Set([...els, ...wids]);
+  return [...bundleElementTypes(bundle, trees)]
+    .filter(([t]) => !known.has(t))
+    .map(([type, { count, where }]) => ({ type, count, where, needs: PRO_ONLY_TYPES[type] || null }));
+}
+
+/** The actionable half of the gate message: name the types, the count, where, and the requirement. */
+export function capabilityError(missing, wpUrl, proActive) {
+  const lines = missing.map((m) => `  • ${m.type} × ${m.count} (first seen: ${m.where})${m.needs ? ` — needs ${m.needs}` : ''}`);
+  const pro = missing.some((m) => m.needs);
+  return new Error(
+    `deploy ABORTED before any page was created: ${missing.length} element type(s) in this bundle are NOT REGISTERED on ${wpUrl}\n`
+    + lines.join('\n') + '\n'
+    + (pro
+      ? `This site reports Elementor Pro ${proActive ? 'ACTIVE but without the atomic-forms experiment' : 'NOT ACTIVE'}. `
+        + `Atomic form fields (form()/field()/formSubmit()/formSuccess()) require Elementor Pro with the `
+        + `e_pro_atomic_form experiment enabled — the free core registers only the e-form container. `
+        + `On a free target: embed a third-party form with <html raw="…">, or link out to a hosted form.\n`
+      : 'Install/activate whatever provides these types on the target, or remove them from the build.\n')
+    + `(The tree save would have 422'd with "Unknown type … is not registered on this site" AFTER creating the post — `
+    + `which is how 1.9.1 stranded orphan pages. Nothing was written. Override with --allow-unregistered to deploy anyway.)`);
+}
+
+/** PURE: the readable half of a rejected tree save. The validator nests the ACTIONABLE part — the
+ * per-element codes and the exact failing settings keys — under `data.errors[]`; the outer message
+ * only says "Element-tree validation failed (N errors)". Slicing the raw JSON body (what 1.9.1
+ * put in the report) therefore truncated away precisely what the author needed to fix. */
+export function summarizeSaveError(body) {
+  try {
+    const j = JSON.parse(body);
+    const errs = j?.data?.errors ?? j?.errors;
+    const detail = Array.isArray(errs) && errs.length
+      ? errs.map((e) => `${e.element_id ? `[${e.element_id}] ` : ''}${e.message || e.code || ''}`.trim()).join(' | ')
+      : '';
+    const out = [j?.code, j?.message, detail].filter(Boolean).join(' — ');
+    return (out || String(body)).slice(0, 400);
+  } catch { return String(body).slice(0, 300); }
+}
+
+/** PURE: the FAILURES hiding inside a deploy report. deployBundle reports per-page errors as
+ * `action: 'ERR …'` strings rather than throwing (one bad page must not abort the others) — which
+ * made `exjsx dev` print "deployed" over two consecutive 422s (field report 1.9.1). Every caller
+ * that renders a success line must consult this first. */
+export function deployFailures(report) {
+  const out = [];
+  for (const p of report?.pages || []) {
+    if (typeof p.action === 'string' && p.action.startsWith('ERR')) out.push(`page "${p.title}" (/${p.slug}/): ${p.action}`);
+  }
+  for (const t of report?.parts || []) {
+    if (typeof t.action === 'string' && t.action.startsWith('ERR')) out.push(`part ${t.type}: ${t.action}`);
+  }
+  if (typeof report?.classes === 'string' && report.classes.startsWith('ERR')) out.push(`class registry: ${report.classes}`);
+  return out;
 }
 
 /* An --inline bundle must NOT touch the target kit's _elementor_global_variables — the kit belongs
@@ -215,15 +318,31 @@ export async function deployBundle(bundle, cfg = {}) {
   try {
     ver = sh(wpcli[0], [...wpcli.slice(1), 'plugin', 'get', 'elementor', '--field=version']).trim();
   } catch { /* no wp-cli — fall back to REST below */ }
-  if (!ver && wpUrl) {
+  // capabilities are fetched UNCONDITIONALLY (not just as the version fallback): the same payload
+  // carries registered_types, which the capability gate below needs BEFORE anything is written.
+  let caps = null;
+  if (wpUrl) {
     try {
       const r = await fetch(`${wpUrl}/wp-json/elementor-ultra/v1/site/capabilities`, { headers: { Authorization: auth } });
-      if (r.ok) { const j = await r.json(); ver = (j?.data ?? j)?.elementor_version || ''; }
-    } catch { /* leave spans as authored if the version can't be determined */ }
+      if (r.ok) { const j = await r.json(); caps = j?.data ?? j; }
+    } catch { /* no companion plugin / unreachable — version stays as authored, gate skips */ }
   }
+  if (!ver) ver = caps?.elementor_version || '';
   if (ver) {
     report.elementorVersion = ver;
     report.spanForm = adaptSpansForVersion(bundle, ver);
+  }
+
+  // 0b) CAPABILITY GATE — fail EARLY (before the kit write, before any post is created) when the
+  // target does not register an element type this bundle ships. See capabilityError above.
+  if (!caps?.registered_types) {
+    if (wpUrl) report.capabilityCheck = 'skipped — the site did not report registered_types (upgrade the elementor-ultra-mcp companion plugin); unregistered element types will 422 at save time';
+  } else if (cfg.allowUnregistered) {
+    report.capabilityCheck = 'skipped — --allow-unregistered';
+  } else {
+    const missing = unregisteredTypes(bundle, caps.registered_types, { pages: plan.pages, parts: plan.skipKit ? [] : bundle.parts });
+    if (missing?.length) throw capabilityError(missing, wpUrl, caps.pro_active === true);
+    report.capabilityCheck = `${bundleElementTypes(bundle, { pages: plan.pages, parts: plan.skipKit ? [] : bundle.parts }).size} element type(s) registered on the target`;
   }
 
   // 1) ONE-SHOT kit write: all variables in a single update_post_meta (no per-token round-trips).
@@ -581,18 +700,38 @@ add_action( 'wp_head', function () {
     }
     let action = id ? 'updated' : 'created';
     // create the page (companion) if it doesn't exist — pure REST, no toolset server / wp-cli.
+    let createdNow = false;
     if (!id) {
       const cr = await fetch(eu('/documents'), { method: 'POST', headers: jhead, body: JSON.stringify({ title: p.title, status: 'publish', template: p.template || 'elementor_canvas' }) });
       const cj = await cr.json().catch(() => ({}));
       const dd = cj.data || cj;
       id = String(dd.id || dd.post_id || dd.ID || '');
       if (!id) { report.pages.push({ title: p.title, slug, id: null, action: `ERR create: ${JSON.stringify(dd).slice(0, 120)}` }); continue; }
+      createdNow = true;
     }
     // write the atomic tree via /save (validates + saves + returns a fresh base_hash) — works for BOTH a
     // freshly-created doc (which has no base_hash yet, so replace-tree can't do the first write) AND an
     // existing one, in a single call. No optimistic-concurrency dance needed for a deploy.
     const rt = await fetch(eu(`/documents/${id}/save`), { method: 'POST', headers: jhead, body: JSON.stringify({ elements: p.elements }) });
-    if (!rt.ok) { report.pages.push({ title: p.title, id, slug, action: `ERR save ${rt.status}: ${(await rt.text()).slice(0, 100)}` }); continue; }
+    if (!rt.ok) {
+      const why = summarizeSaveError(await rt.text().catch(() => ''));
+      /* ORPHAN CLEANUP (field report 1.9.1): "create the post, then 422 the tree save" left an
+       * EMPTY published page behind, and the author's retry created a SECOND one. A create + save
+       * is one logical operation, so a failed save rolls the create back. Only a post THIS run
+       * created is deleted — an existing page keeps its previous (good) tree. force=true skips the
+       * trash so a retry sees a clean slate rather than a slug collision with a trashed post. */
+      let rolledBack = '';
+      if (createdNow) {
+        const del = await fetch(`${wpUrl}/wp-json/wp/v2/pages/${id}?force=true`, { method: 'DELETE', headers: jhead }).catch(() => null);
+        rolledBack = del?.ok
+          ? ' — the just-created page was DELETED (no orphan left behind)'
+          : ` — could not roll back the just-created page ${id}; delete it manually before retrying`;
+        report.orphansRolledBack = [...(report.orphansRolledBack || []), { slug, id, deleted: !!del?.ok }];
+      }
+      console.error(`✖ save FAILED for "${p.title}" (/${slug}/): ${rt.status} ${why}${rolledBack}`);
+      report.pages.push({ title: p.title, id: createdNow ? null : id, slug, action: `ERR save ${rt.status}: ${why}${rolledBack}` });
+      continue;
+    }
     // SELF-PRIMING with retry: on PHP-WASM the first prime after a save races the CSS flush and
     // 500s CSS_PRIME_FAILED (retryable) — a settle + retry converts nearly all of those into
     // successes. Field agents were healing this by hand after every deploy; now the deploy owns it.

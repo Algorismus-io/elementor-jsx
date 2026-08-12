@@ -73,6 +73,9 @@ export type AnimateOptions = MotionSpec;
 /** The sx shorthand — every key maps to a verified atomic envelope (see unit/sx.test.mjs).
  * Standard CSS property names (kebab or camelCase: `padding`, `maxWidth`, `textAlign`, …) are
  * accepted as aliases for these keys, with CSS-string values parsed (`padding: '96px 24px'`). */
+/** A single box-shadow layer: [vOffset, blur, spread, color, hOffset?, 'inset'?] (px). */
+export type ShadowSpec = [v: number, blur: number, spread: number, color: string, h?: number, position?: 'inset'];
+
 export interface SxProps {
   bg?: string | [angle: number, from: string, to: string] | Envelope;
   grad?: [angle: number, from: string, to: string];
@@ -109,7 +112,9 @@ export interface SxProps {
   gridCols?: number | string;
   gridRows?: number | string;
   pos?: string;
-  shadow?: [v: number, blur: number, spread: number, color: string] | Envelope;
+  /** ONE layer, or an ARRAY of layers → the multi-item box-shadow envelope (layered elevation,
+   * pixel-stepped borders). Kit equivalents: SHADOW(...spec) / SHADOWS(...specs). */
+  shadow?: ShadowSpec | ShadowSpec[] | Envelope;
   fit?: string;
   border?: string | [width: number, color: string];
   tablet?: SxProps;

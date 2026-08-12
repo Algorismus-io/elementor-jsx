@@ -5,11 +5,11 @@
  */
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { lintBundle, formatLint } from '../../src/lint.mjs';
+import { lintBundle, formatLint, inexpressibleBySx, PRO_ONLY_TYPES } from '../../src/lint.mjs';
 import { compileSite } from '../../src/compile.mjs';
 import { defineSite } from '../../src/site.mjs';
 import { h } from '../../src/runtime.mjs';
-import { fontLoader } from '../../src/kit/kit.mjs';
+import { fontLoader, form, field, formSubmit } from '../../src/kit/kit.mjs';
 import { resetIds } from '../helpers.mjs';
 
 beforeEach(() => resetIds());
@@ -303,4 +303,83 @@ test('lint: pro-interaction warns on pro-flagged fields ("saves everywhere, anim
   assert.match(f[3].message, /easing, replay are DEAD on free/);
   const free = lintBundle(withItems(interaction(), interaction({ trigger: 'load', effect: 'slide', direction: 'top' })));
   assert.equal(of(free, 'pro-interaction').length, 0, 'free-tier surface stays silent');
+});
+
+/* ── 1.9.2 field report #4: horizontal slide parks the element off-canvas on the X axis until the
+   trigger fires — real document overflow (a gate caught scrollWidth 442 at a 390px viewport). ── */
+test('lint: horizontal-slide-overflow warns on slide left/right and names the clipping fix', () => {
+  const b = withItems(
+    interaction({ effect: 'slide', direction: 'left' }),
+    interaction({ effect: 'slide', direction: 'bottom-right' }),
+  );
+  const f = of(lintBundle(b), 'horizontal-slide-overflow');
+  assert.equal(f.length, 2, formatLint(lintBundle(b)));
+  assert.ok(f.every((x) => x.severity === 'warn'));
+  assert.match(f[0].message, /slide direction 'left' parks the element OFF-CANVAS on the X axis/);
+  assert.match(f[0].message, /never resolves if the trigger doesn't fire/);
+  assert.match(f[0].fix, /overflow-x:clip/);
+  assert.match(f[1].message, /'bottom-right'/, 'diagonals carry an X component too');
+});
+
+test('lint: horizontal-slide-overflow is SILENT on vertical slide, fade and scale', () => {
+  const b = withItems(
+    interaction({ effect: 'slide', direction: 'top' }),
+    interaction({ effect: 'slide', direction: 'bottom' }),
+    interaction({ effect: 'fade' }),
+    interaction({ effect: 'scale', direction: 'left' }),   // direction is inert for scale
+  );
+  assert.equal(of(lintBundle(b), 'horizontal-slide-overflow').length, 0, formatLint(lintBundle(b)));
+});
+
+/* ── 1.9.2 field report #1 (offline half): Pro-only atomic types are invisible to lint's target,
+   so this WARNS and points at the deploy gate — which is where the hard failure belongs. ── */
+test('lint: pro-only-element warns on every e-form-* field widget and names the Pro requirement', () => {
+  const b = build(page('contact', h('box', { pad: 0 }, h('h1', {}, 'Contact'),
+    form({ name: 'c' }, [field('email', 'Email'), formSubmit('Send')]))));
+  const f = of(lintBundle(b), 'pro-only-element');
+  assert.ok(f.length >= 4, formatLint(lintBundle(b)));
+  const types = f.map((x) => x.message.match(/<(e-[a-z-]+)>/)[1]).sort();
+  assert.deepEqual(types, ['e-form-error-message', 'e-form-input', 'e-form-label', 'e-form-submit-button', 'e-form-success-message']);
+  assert.ok(f.every((x) => x.severity === 'warn'), 'lint cannot know the target — warn, never error');
+  assert.match(f[0].message, /e_pro_atomic_form/);
+  assert.match(f[0].message, /Unknown type e-form-\w+ is not registered on this site/);
+  assert.match(f[0].fix, /lint is offline and cannot see the deploy target — deploy probes the site/);
+  // the e-form CONTAINER itself IS free-core registered — it must not be flagged
+  assert.equal(PRO_ONLY_TYPES['e-form'], undefined);
+});
+
+test('lint: pro-only-element is SILENT on a page with no Pro atomic elements', () => {
+  const b = build(page('home', h('box', { pad: 0 }, h('h1', {}, 'Hi'), h('text', {}, 'copy'))));
+  assert.equal(of(lintBundle(b), 'pro-only-element').length, 0);
+});
+
+/* ── 1.9.2 field report #6: raw-atomic-overlap fired on every element whose raw CSS was the ONLY
+   way to write the value. Half the fix is that multi-layer shadows are now atomic (so those
+   warnings became true), half is that genuinely inexpressible values stop warning. ── */
+test('lint: inexpressibleBySx — sx cannot emit CSS functions, !important or layered backgrounds', () => {
+  assert.equal(inexpressibleBySx('width', 'calc(100% - 32px)'), true);
+  assert.equal(inexpressibleBySx('font-size', 'clamp(16px, 2vw, 24px)'), true);
+  assert.equal(inexpressibleBySx('padding', '12px !important'), true);
+  assert.equal(inexpressibleBySx('max-width', 'var(--wrap)'), true, 'var() in a SIZE has no sx form');
+  assert.equal(inexpressibleBySx('background', 'url(a.png) center/cover no-repeat'), true);
+  assert.equal(inexpressibleBySx('background', '#fff, #000'), true, 'multiple layers');
+  // …and what it CAN emit stays flagged
+  assert.equal(inexpressibleBySx('padding', '24px'), false);
+  assert.equal(inexpressibleBySx('color', 'var(--brand)'), false, 'var() IS a colour value C() passes through');
+  assert.equal(inexpressibleBySx('background', 'linear-gradient(135deg, #0ff, #f0f)'), false);
+  assert.equal(inexpressibleBySx('box-shadow', '1px 0 0 #000, 2px 0 0 #000'), false, 'multi-layer shadows are atomic since 1.9.2');
+});
+
+test('lint: raw-atomic-overlap stays SILENT on values the sx layer cannot express', () => {
+  const b = build(page('home', h('box', { pad: 0, raw: 'width:calc(100% - 32px);max-width:var(--wrap);padding:8px !important;' },
+    h('h1', {}, 'Hi'))));
+  assert.equal(of(lintBundle(b), 'raw-atomic-overlap').length, 0, formatLint(lintBundle(b)));
+});
+
+test('lint: raw-atomic-overlap still fires on expressible raw — incl. multi-layer shadows, and names the array form', () => {
+  const b = build(page('home', h('box', { pad: 0, raw: 'box-shadow:1px 0 0 #000, 2px 0 0 #000;padding:24px;' }, h('h1', {}, 'Hi'))));
+  const f = of(lintBundle(b), 'raw-atomic-overlap');
+  assert.equal(f.length, 1, formatLint(lintBundle(b)));
+  assert.match(f[0].message, /raw CSS sets \[box-shadow, padding\]/);
+  assert.match(f[0].fix, /shadow=\{\[\[v,blur,spread,color,h\],\[…\]\]\}/);
 });

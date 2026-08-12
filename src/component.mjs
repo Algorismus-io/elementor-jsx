@@ -143,16 +143,35 @@ const findById = (els, id) => {
   return null;
 };
 
-/* ── validation: atomic-only (mirrors server 422 non_atomic_element_in_component) ── */
+/* ── validation: atomic-only (mirrors server 422 non_atomic_element_in_component) ──
+ * Elementor's Non_Atomic_Widget_Validator keys off `widgetType ?? elType` and asks the elements
+ * manager whether that instance is atomic — so the check is ELEMENT-TYPE-wide, not widget-only.
+ * Every atomic type is `e-`-prefixed (e-flexbox, e-div-block, e-grid, e-heading, e-paragraph,
+ * e-button, e-image, e-svg, e-tabs, e-form…, e-component); everything else is not: the classic
+ * widgets (html, nav-menu, icon, shortcode…) AND the V3 containers (container/section/column)
+ * that arrive via raw node()/decompiled/imported subtrees.
+ * v1.9.1 only looked at elType === 'widget', so ANY non-widget non-atomic node — a V3 container,
+ * an <details>-carrying raw element — sailed past the build and 422'd on POST /components with
+ * "Component contains non-supported elements" (field report 1.9.1). */
+const isAtomicType = (t) => typeof t === 'string' && t.startsWith('e-');
 function assertAtomicOnly(elements, title) {
   (function walk(ns, path) {
     ns.forEach((n, i) => {
-      const p = `${path}[${i}]<${n.widgetType ?? n.elType}>`;
-      if (n.elType === 'widget' && n.widgetType && !n.widgetType.startsWith('e-')) {
+      const type = n.widgetType ?? n.elType;
+      const p = `${path}[${i}]<${type}>`;
+      if (!isAtomicType(type)) {
+        const classic = n.elType === 'widget';
         throw new Error(
-          `component "${title}": classic widget "${n.widgetType}" at ${p} — Elementor components accept ATOMIC elements only ` +
-          `(the server 422s with non_atomic_element_in_component). navBar, browserMock and <html> all render the classic html ` +
-          `widget; move that part out of the component, or drop defineComponent to keep inline expansion.`);
+          `component "${title}": non-atomic element "${type}" at ${p} — Elementor components accept ATOMIC ` +
+          `(e-*) elements ONLY; the server rejects the whole batch with non_atomic_element_in_component ` +
+          `("Component contains non-supported elements: ${type}"). ` +
+          (classic
+            ? `"${type}" is a CLASSIC widget — navBar, browserMock and <html raw="…"> (incl. <details>/<summary> ` +
+              `markup, custom <script>/<style> blocks) all render the classic html widget. `
+            : `"${type}" is a V3/legacy container (container/section/column) — atomic pages use e-flexbox / ` +
+              `e-div-block / e-grid. `) +
+          `Move that part OUT of the component (keep it on the page around the instance), rebuild it from ` +
+          `atomic elements, or drop defineComponent for this one to keep inline expansion.`);
       }
       walk(n.elements || [], p + '.elements');
     });
@@ -178,6 +197,28 @@ function diffSettings(a, b, path, out) {
   return out;
 }
 
+/* ── media props are NOT overridable (field report 1.9.1) ──
+ * An image/svg/video prop reaches the tree through an ENVELOPE that carries a per-site attachment
+ * id or a validated absolute URL — never a bare string. The sentinel diff therefore either dies
+ * inside the builder (IMG_URL rejects the sentinel as a non-absolute URL: the cryptic
+ * `IMG_URL: "⁣EXJSX_PROP:src⁣" — url-src images need an ABSOLUTE http(s) URL` an author got
+ * instead of a component error) or, on the attachment-id path, lands the sentinel INSIDE the
+ * image envelope — an override target whose value is a site-local attachment id, which is exactly
+ * what a portable component tree must not carry. Both are BUILD errors with one honest message.
+ * Not fixable by "just wrapping it better": Elementor resolves component media once, at the
+ * definition, and its override controls cover settings scalars — an image override would have to
+ * ship a whole image envelope per instance with ids that differ per site. */
+const MEDIA_ENVELOPES = new Set(['image', 'image-src', 'image-attachment-id', 'svg-src', 'video-src', 'url']);
+const MEDIA_BUILDER = /IMG_URL|IMG_ID|SVG_ID|VIDEO_URL|VIDEO_ID|\bimage\b|\bsvg\b/i;
+const mediaPropError = (title, key, where) => new Error(
+  `component "${title}": prop "${key}" feeds an IMAGE/media value${where ? ` (${where})` : ''} — media cannot be a ` +
+  `per-instance override. Elementor resolves a component's media ONCE at the definition: the override envelope ` +
+  `carries settings scalars, and an image rides an attachment id (site-local) or a validated absolute URL, so a ` +
+  `placeholder can neither render the definition nor stay portable across sites. ` +
+  `Fix: (a) ship one registered component per image (the variant-per-component idiom, same as visual variants), ` +
+  `(b) keep the image FIXED in the definition and vary only text/link props, or ` +
+  `(c) drop defineComponent for this one — inline expansion takes any props, including media.`);
+
 function mapProp(def, key, title) {
   const sentinel = SENTINEL(key);
   let B;
@@ -190,6 +231,18 @@ function mapProp(def, key, title) {
         `component "${title}": prop "${key}" CHANGES THE TREE STRUCTURE (conditional rendering?) — overridable props can ` +
         `only swap a settings value, never the shape. Bake the variants as separate registered components, or drop ` +
         `defineComponent for this one.`);
+    }
+    // the sentinel reached a builder that VALIDATES its argument and threw from inside the
+    // definition render — surface it as a component-mapping error, not as the builder's riddle.
+    const msg = String(e.message || e);
+    if (msg.includes(sentinel) || msg.includes('EXJSX_PROP:')) {
+      if (MEDIA_BUILDER.test(msg)) throw mediaPropError(title, key, msg.split(':')[0].trim());
+      throw new Error(
+        `component "${title}": prop "${key}" is validated at BUILD time by the element it feeds, so the ` +
+        `sentinel render fails: "${msg.slice(0, 160)}". Registered components render the definition once with a ` +
+        `placeholder to discover where each prop lands — a prop whose value must satisfy a format check (URL, ` +
+        `enum, number) cannot be discovered that way. Give the prop a plain text/number target, or drop ` +
+        `defineComponent for this one to keep inline expansion.`);
     }
     throw e;
   }
@@ -212,6 +265,12 @@ function mapProp(def, key, title) {
       `Split it into one prop per target (fan-out is a v2 candidate).`);
   }
   const d = diffs[0];
+  // the attachment-id half of the media rule: IMG_ID/SVG_ID do NOT validate their argument, so
+  // the sentinel lands INSIDE the image envelope and the sentinel assertion below would happily
+  // accept it — mapping the prop to a whole media envelope. Reject on the envelope's own $$type.
+  if (MEDIA_ENVELOPES.has(d.bVal?.$$type) || MEDIA_ENVELOPES.has(d.aVal?.$$type)) {
+    throw mediaPropError(title, key, `<${d.widgetType ?? d.elType}>.${d.propKey} is a ${d.bVal?.$$type ?? d.aVal?.$$type} envelope`);
+  }
   if (!stable(d.bVal).includes(sentinel)) {
     throw new Error(
       `component "${title}": prop "${key}" produced a diff at <${d.widgetType ?? d.elType}>.${d.propKey} that does NOT contain ` +
