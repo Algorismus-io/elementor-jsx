@@ -237,7 +237,10 @@ test('components: uid CHANGES when the tree or the title changes', () => {
     { title: 'Other Title', props: { headline: { label: 'Headline' }, cta: { label: 'Button label' } } });
   const retitled = compileSite(site(page('a', h(T, {})))).components[0];
   assert.notEqual(base.uid, retitled.uid, 'title participates in the uid');
-  assert.equal(base.treeHash, retitled.treeHash, 'treeHash covers the elements only — identical tree, retitled');
+  // phase 2: element ids are SALTED by the title (cross-component local-style class collisions —
+  // see normalizeComponentIds), so the shipped tree of a retitled component differs and treeHash
+  // (a display-only drift fingerprint in warnings) legitimately changes with it.
+  assert.notEqual(base.treeHash, retitled.treeHash, 'treeHash covers the SHIPPED tree, whose ids embed the title salt');
   const G = defineComponent(({ headline = 'Grow faster', cta = 'Get started' }) => h('box', { pad: 32, gap: 12 },   // pad 24 → 32
     h('h2', { size: 28 }, headline), button(cta, 'https://example.com/signup')),
     { title: 'Price Card', props: { headline: { label: 'Headline' }, cta: { label: 'Button label' } } });
@@ -301,6 +304,21 @@ test('expandInstances: the 403 fallback — overrides applied, defaults kept, nu
   const { el } = collectIds(expanded);
   assert.equal(new Set(el).size, el.length, 'ids re-minted unique across the two copies');
   assert.equal(allNodes(expanded).some((n) => stable(n.settings).includes('overridable')), false, 'no overridable envelopes leak');
+});
+
+test('components: local-style ids NEVER collide across components (title-salted ids — the CSS-steal regression)', () => {
+  // live-found (phase-2 E2E): unsalted normalization gave every component c00000… ids, so two
+  // components on one page shipped IDENTICAL .e-c00000-s selectors in their per-component css
+  // files — the last-enqueued file won and one component stole the other's box styles.
+  const A = defineComponent(() => h('box', { pad: 24, bg: '#fee2e2' }, h('h2', {}, 'a')), { title: 'Salt A', props: {} });
+  const B = defineComponent(() => h('box', { pad: 16, bg: '#dcfce7' }, h('h3', {}, 'b')), { title: 'Salt B', props: {} });
+  const b = compileSite(site(page('a', h('box', { pad: 0 }, h(A, {}), h(B, {})))));
+  const styleIds = (c) => allNodes(c.elements).flatMap((n) => Object.keys(n.styles || {}));
+  const [sa, sb] = b.components.map(styleIds);
+  assert.ok(sa.length && sb.length, 'both components carry local styles');
+  assert.deepEqual(sa.filter((id) => sb.includes(id)), [], 'no shared style id ⇒ no shared css selector');
+  const elIds = (c) => allNodes(c.elements).map((n) => n.id);
+  assert.deepEqual(elIds(b.components[0]).filter((id) => elIds(b.components[1]).includes(id)), [], 'element ids disjoint too');
 });
 
 test('djb2: stable known fingerprint (uid/treeHash primitive)', () => {

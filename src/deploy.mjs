@@ -128,16 +128,17 @@ export function planOnly(bundle, only) {
 }
 
 /* COMPONENT redeploy planning — PURE (no I/O). The uid doubles as the deployed-tree fingerprint
- * (compile mints uid = djb2(normalized tree + title)), so v1 needs NO sidecar file:
+ * (compile mints uid = djb2(normalized tree + title)), so no sidecar file is needed:
  *   - remote uid match            → tree unchanged since last deploy → reuse the id, skip create.
- *   - remote TITLE match, uid ≠   → the local tree changed → reuse the deployed id but WARN:
- *     there is no update-elements REST route (phase 2 ships the ultra-mcp controller); creating
- *     under the new uid would 422 on the unique-title constraint. Instances keep rendering the
- *     DEPLOYED tree until phase 2 (or archive + redeploy).
+ *   - remote TITLE match, uid ≠   → the local tree changed. With `opts.updatable` (the target has
+ *     the ultra-mcp components controller — phase 2) the entry lands in `update` for an in-place
+ *     `PUT /components/{id}/elements`. Without it (native route only — Elementor ships NO
+ *     update-elements route) → reuse the deployed id + WARN: creating under the new uid would 422
+ *     on the unique-title constraint, so instances keep rendering the DEPLOYED tree.
  *   - no match                    → create.
  * The bundle additionally carries per-component `treeHash` (djb2 of the normalized tree alone) so
  * warnings can show the drift fingerprint — that is the "stash hashes in the bundle" decision. */
-export function planComponents(locals, remoteItems) {
+export function planComponents(locals, remoteItems, opts = {}) {
   const byUid = new Map(); const byTitle = new Map();
   for (const r of remoteItems || []) {
     const uid = r.uid ?? r.component_uid;
@@ -147,30 +148,39 @@ export function planComponents(locals, remoteItems) {
     if (uid && Number.isFinite(id)) byUid.set(uid, { id, title, archived });
     if (title && Number.isFinite(id)) byTitle.set(title, { id, uid, archived });
   }
-  const create = []; const reuse = []; const warnings = [];
+  const create = []; const reuse = []; const update = []; const warnings = [];
   for (const c of locals || []) {
     const hit = byUid.get(c.uid);
     if (hit) {
-      // an ARCHIVED match still occupies the uid/title (create would 422 on uniqueness), so v1
-      // reuses it but warns — an archived component does not render until unarchived in Elementor.
+      // an ARCHIVED match still occupies the uid/title (create would 422 on uniqueness), so
+      // reuse it but warn — an archived component does not render until unarchived in Elementor.
       if (hit.archived) warnings.push(`component "${c.title}": the deployed component (id ${hit.id}) is ARCHIVED on the target — instances will not render until you unarchive it in Elementor (Components manager)`);
       reuse.push({ uid: c.uid, title: c.title, id: hit.id, action: hit.archived ? 'reused-archived' : 'reused' });
       continue;
     }
     const t = byTitle.get(c.title);
     if (t) {
-      reuse.push({ uid: c.uid, title: c.title, id: t.id, action: 'reused-stale' });
-      warnings.push(
-        `component "${c.title}": local tree CHANGED since last deploy (local uid ${c.uid}` +
-        `${c.treeHash ? `, tree ${c.treeHash}` : ''} ≠ deployed uid ${t.uid || '?'}) — reusing id ${t.id}; ` +
-        `instances keep rendering the DEPLOYED tree (no update route in v1 — the phase-2 ultra-mcp ` +
-        `controller ships it; to force the new tree now, archive the component in Elementor and redeploy)`);
+      if (opts.updatable) {
+        update.push({ uid: c.uid, title: c.title, id: t.id, deployedUid: t.uid, local: c });
+      } else {
+        reuse.push({ uid: c.uid, title: c.title, id: t.id, action: 'reused-stale' });
+        warnings.push(staleWarning(c, t));
+      }
       continue;
     }
     create.push(c);
   }
-  return { create, reuse, warnings };
+  return { create, reuse, update, warnings };
 }
+
+/* the native-route-only stale warning — also emitted by deployBundle when an update was PLANNED but
+ * the ultra route turned out unusable at PUT time (degrade to v1 reuse semantics, never silently) */
+const staleWarning = (c, t) =>
+  `component "${c.title}": local tree CHANGED since last deploy (local uid ${c.uid}` +
+  `${c.treeHash ? `, tree ${c.treeHash}` : ''} ≠ deployed uid ${t.uid ?? t.deployedUid ?? '?'}) — reusing id ${t.id}; ` +
+  `instances keep rendering the DEPLOYED tree (Elementor ships no update route — install/upgrade the ` +
+  `elementor-ultra-mcp plugin for in-place component updates; to force the new tree now, archive the ` +
+  `component in Elementor and redeploy)`;
 
 export async function deployBundle(bundle, cfg = {}) {
   // --only validation FIRST — an unknown slug must throw before any wp-cli call or fetch
@@ -302,41 +312,87 @@ export async function deployBundle(bundle, cfg = {}) {
     if (merged) report.classesMerged = `${merged} resident class(es) preserved (foreign store — use --own-classes to replace)`;
   }
 
-  // 1b-2) COMPONENTS (spec 2.0 phase 1) — create-or-reuse BEFORE pages so every e-component
+  // 1b-2) COMPONENTS (spec 2.0) — create-or-reuse-or-UPDATE BEFORE pages so every e-component
   // instance node can be rewritten with the real per-site id (bundles stay uid-keyed). Runs even
-  // under --only: the filtered pages still need their component ids. Failure ladder:
-  //   403 insufficient_permissions (no ACTIVE Elementor Pro) or missing route → WARN + inline-
-  //   expand every instance for THIS deploy (locked decision — builds stay portable);
-  //   422 → surface Elementor's error codes verbatim and abort (dangling component_ids are worse).
+  // under --only: the filtered pages still need their component ids. ROUTE LADDER (phase 2):
+  //   1. the NATIVE route (`elementor/v1/components`, needs ACTIVE Elementor Pro for writes);
+  //   2. on 403 insufficient_permissions / 404 → the ULTRA route (`elementor-ultra/v1/components`,
+  //      the companion plugin's free-tier controller — same validators, same body, same {uid:id});
+  //   3. neither → WARN + inline-expand every instance for THIS deploy (locked decision — builds
+  //      stay portable). 501 EXPERIMENT_INACTIVE from the ultra route names the required
+  //      experiments and also falls through to inline.
+  //   422 (either route) → surface Elementor's error codes verbatim and abort (dangling
+  //   component_ids are worse).
+  // UPDATES: a title-match-with-changed-uid means the local tree changed. The ultra route ships
+  // the missing update-elements PUT — when it is available the new tree is PUT in place (action
+  // 'updated'); when only the native route exists the v1 warn-and-reuse semantics stay.
   if (bundle.components?.length && wpUrl) {
     const chead = { 'Content-Type': 'application/json', Authorization: auth };
     const warnC = (m) => { console.error(`WARN: ${m}`); report.componentWarnings = [...(report.componentWarnings || []), m]; };
-    const croute = `${wpUrl}/wp-json/elementor/v1/components`;
-    const listComponents = async () => {
-      const r = await fetch(croute, { headers: chead });
-      if (!r.ok) return { status: r.status, items: null };
+    const routes = {
+      native: `${wpUrl}/wp-json/elementor/v1/components`,
+      ultra: `${wpUrl}/wp-json/elementor-ultra/v1/components`,
+    };
+    let mode = 'native';                      // which base the writes go through
+    const croute = () => routes[mode];
+    // list parser handles every observed shape: Elementor {data:[…]}, ultra {success,data:[…]}, bare […]
+    const listComponents = async (base = croute()) => {
+      const r = await fetch(base, { headers: chead });
+      if (!r.ok) return { status: r.status, items: null, body: await r.text().catch(() => '') };
       const j = await r.json().catch(() => ({}));
       return { status: r.status, items: Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [] };
     };
+    // memoized probe: does the target advertise the ultra components controller? (older plugin
+    // versions 404 the route; sites without the module 501 — neither can take writes)
+    let ultraProbe = null;
+    const ultraAvailable = async () => {
+      if (ultraProbe === null) ultraProbe = await listComponents(routes.ultra);
+      return ultraProbe.items !== null;
+    };
     let uidToId = null;   // stays null ⇒ inline-expansion fallback
     try {
-      const list = await listComponents();
+      let list = await listComponents();
+      if (list.items === null && (await ultraAvailable())) {
+        // native list unavailable (hardened site / very old Elementor) but the ultra controller
+        // answers — run the whole phase through it.
+        mode = 'ultra';
+        report.componentsRoute = 'ultra';
+        list = ultraProbe;
+      }
       if (list.items === null) {
         if (list.status === 403 || list.status === 404) {
-          warnC(`components: ${croute} → ${list.status} (${list.status === 403 ? 'no active Elementor Pro' : 'route missing — Elementor < 4.2?'}) — falling back to INLINE EXPANSION for this deploy (pages render identically but are NOT linked to editable components)`);
+          warnC(`components: ${routes.native} → ${list.status} (${list.status === 403 ? 'no active Elementor Pro' : 'route missing — Elementor < 4.2?'}) and no ultra-mcp components controller — falling back to INLINE EXPANSION for this deploy (pages render identically but are NOT linked to editable components)`);
         } else {
           warnC(`components: list failed (${list.status}) — falling back to inline expansion for this deploy`);
         }
       } else {
-        const cplan = planComponents(bundle.components, list.items);
+        const cplan = planComponents(bundle.components, list.items, { updatable: true });
         for (const w of cplan.warnings) warnC(w);
         if (cfg.dry) {
-          report.componentsDry = `would create ${cplan.create.length} component(s), reuse ${cplan.reuse.length}`;
-          report.components = [...cplan.reuse, ...cplan.create.map((c) => ({ uid: c.uid, title: c.title, id: null, action: 'create' }))];
+          report.componentsDry = `would create ${cplan.create.length} component(s), update ${cplan.update.length} (ultra route), reuse ${cplan.reuse.length}`;
+          report.components = [
+            ...cplan.reuse,
+            ...cplan.update.map((u) => ({ uid: u.uid, title: u.title, id: u.id, action: 'update' })),
+            ...cplan.create.map((c) => ({ uid: c.uid, title: c.title, id: null, action: 'create' })),
+          ];
         } else {
           uidToId = {};
           for (const r of cplan.reuse) uidToId[r.uid] = r.id;
+          for (const u of cplan.update) uidToId[u.uid] = u.id;   // updates keep their deployed id
           report.components = [...cplan.reuse];
+          // one POST for a dependency level, with the free-tier escalation: a native 403/404
+          // switches to the ultra route ONCE (mode is sticky) and retries the same level there.
+          const postLevel = async (level) => {
+            const body = JSON.stringify({ status: 'publish', items: level.map(({ uid, title, elements, settings }) => ({ uid, title, elements, settings })) });
+            let res = await fetch(croute(), { method: 'POST', headers: chead, body });
+            if ((res.status === 403 || res.status === 404) && mode === 'native' && (await ultraAvailable())) {
+              const nbody = await res.text();
+              mode = 'ultra';
+              report.componentsRoute = `ultra (native POST ${res.status}${/insufficient_permissions/.test(nbody) ? ' insufficient_permissions — Elementor Pro not ACTIVE' : ''})`;
+              res = await fetch(croute(), { method: 'POST', headers: chead, body });
+            }
+            return res;
+          };
           // TOPO-ordered creation (components composing components reference each other by uid;
           // nested instance placeholders must be rewritten with REAL ids before their parent
           // POSTs). Each dependency level ships as one batch POST; ids come from a re-list
@@ -347,13 +403,10 @@ export async function deployBundle(bundle, cfg = {}) {
             if (!level.length) throw new Error(`components: unresolvable composition order among ${pending.map((c) => c.title).join(', ')} (cycle should have failed the build)`);
             pending = pending.filter((c) => !level.includes(c));
             for (const c of level) rewriteComponentIds(c.elements, uidToId);   // nested refs → real ids (deps created in earlier levels)
-            const res = await fetch(croute, {
-              method: 'POST', headers: chead,
-              body: JSON.stringify({ status: 'publish', items: level.map(({ uid, title, elements, settings }) => ({ uid, title, elements, settings })) }),
-            });
-            if (res.status === 403 || res.status === 404) {
+            const res = await postLevel(level);
+            if (res.status === 403 || res.status === 404 || res.status === 501) {
               const body = await res.text();
-              warnC(`components: create → ${res.status}${/insufficient_permissions/.test(body) ? ' insufficient_permissions (Elementor Pro not ACTIVE)' : ''} — falling back to INLINE EXPANSION for this deploy`);
+              warnC(`components: create → ${res.status}${/insufficient_permissions/.test(body) ? ' insufficient_permissions (Elementor Pro not ACTIVE, no usable ultra route)' : /EXPERIMENT_INACTIVE|e_components/.test(body) ? ' (components module inactive — activate the e_components + e_atomic_elements experiments)' : ''} — falling back to INLINE EXPANSION for this deploy`);
               uidToId = null;
               break;
             }
@@ -369,6 +422,38 @@ export async function deployBundle(bundle, cfg = {}) {
               if (id === undefined) throw new Error(`components: "${c.title}" (uid ${c.uid}) missing from the post-create list — cannot map its instances`);
               uidToId[c.uid] = id;
               report.components.push({ uid: c.uid, title: c.title, id, action: 'created' });
+            }
+          }
+          // UPDATES (after creates: an updated tree may reference components minted this run) —
+          // in-place PUT via the ultra route only; without it, degrade to v1 warn-and-reuse.
+          if (uidToId && cplan.update.length) {
+            const canUpdate = mode === 'ultra' || (await ultraAvailable());
+            for (const u of cplan.update) {
+              if (!canUpdate) {
+                warnC(staleWarning(u.local, u));
+                report.components.push({ uid: u.uid, title: u.title, id: u.id, action: 'reused-stale' });
+                continue;
+              }
+              rewriteComponentIds(u.local.elements, uidToId);
+              // `uid` re-stamps the deployed fingerprint: without it the target keeps the OLD uid
+              // and every later redeploy would re-detect "changed tree" and PUT again forever
+              // (live-found on the phase-2 E2E — the second identical deploy still reported updates).
+              const res = await fetch(`${routes.ultra}/${u.id}/elements`, {
+                method: 'PUT', headers: chead,
+                body: JSON.stringify({ elements: u.local.elements, settings: u.local.settings, uid: u.uid }),
+              });
+              if (res.status === 422) {
+                const body = await res.json().catch(async () => ({ code: 'unknown', message: await res.text().catch(() => '') }));
+                throw new Error(`components: update of "${u.title}" rejected (422 ${body.code || ''}): ${body.message || JSON.stringify(body).slice(0, 300)}`);
+              }
+              if (!res.ok) {
+                // non-validation failure (401/403/500/501) — the deployed tree still renders; keep
+                // the v1 semantics for THIS component instead of aborting the whole deploy.
+                warnC(`components: update of "${u.title}" via ${routes.ultra}/${u.id}/elements failed (${res.status}: ${(await res.text().catch(() => '')).slice(0, 120)}) — instances keep rendering the DEPLOYED tree`);
+                report.components.push({ uid: u.uid, title: u.title, id: u.id, action: 'reused-stale' });
+                continue;
+              }
+              report.components.push({ uid: u.uid, title: u.title, id: u.id, action: 'updated' });
             }
           }
         }

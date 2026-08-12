@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+**Components 1:1 (SPEC 2.0 — phase 2)** — the free-tier + update deploy path and prop forwarding:
+- **Deploy route ladder** (`deploy.mjs`): native `POST /elementor/v1/components` first; on 403
+  `insufficient_permissions` (no ACTIVE Pro) or 404 the phase escalates ONCE to the ultra-mcp
+  plugin's `elementor-ultra/v1/components` controller (same body/validators/`{uid:id}` map,
+  server-side validation reuses Elementor's own validator classes) — inline expansion is now the
+  LAST resort, kept for targets with neither route; a 501 `EXPERIMENT_INACTIVE` ultra answer
+  (components module off) names `e_components` + `e_atomic_elements` and falls through to inline.
+  `report.componentsRoute` records the escalation; the ultra probe is memoized (one extra GET,
+  only when needed).
+- **Redeploy UPDATE path**: title-match-with-changed-uid now PUTs the new tree via
+  `PUT elementor-ultra/v1/components/{id}/elements` (`{elements, settings:{overridable_props}}`,
+  ids rewritten against the full uid→id map first, updates run AFTER creates so new nested refs
+  resolve) — action `updated`, no warning. With only the native route the v1 warn-and-reuse
+  semantics stay verbatim (WARN kept, action `reused-stale`); a 422 on update aborts with
+  Elementor's code verbatim; other update failures degrade that ONE component to reused-stale.
+  `planComponents(locals, remote, {updatable})` grew the pure `update` bucket (default signature
+  unchanged — v1 callers/tests untouched).
+- **Prop forwarding / composition (`overridable(override)` chain)** (`component.mjs`): a
+  registered component nesting another may now forward its own props into the child — the
+  phase-1 build error is replaced by the native chain envelope (editor createOverrideValue /
+  resolve-overrides-chain semantics, verified 4.2.1): the nested instance's override item is
+  wrapped as `overridable{override_key: OUTER, origin_value: override{override_key: INNER,
+  override_value: baseline, schema_source:{component, CHILD id}}}`; the parent registry entry
+  lands on the instance node (`widget/e-component/component_instance`) with `originPropFields`
+  pointing at the true leaf element (carried through for 3+-level chains) and the UNWRAPPED
+  baseline as `originValue` (editor parity). Page-level instance overrides of a forwarded prop
+  stay PLAIN `override` envelopes with the extracted child value. Build errors: forwarding
+  without a baseline default; one prop feeding multiple child overrides; two props feeding the
+  same child prop. `rewriteComponentIds` rewrites the wrapped override's `schema_source` (the
+  chain invariant: same id as `component_id`); `expandInstances` resolves chains
+  (Overridable_Transformer parity — outer value rides to the inner key, `null` clears).
+- **Per-component id salt** (live-found on the E2E): component element ids are now
+  `c<djb2(title)><n>` instead of `c00000…`. Local-style ids embed the element id, so every
+  component previously shipped the SAME `.e-c00000-s` selectors in its own per-component CSS
+  file — on a page rendering two components the last-enqueued file won and one component stole
+  the other's box styles (seen: the nested parent rendering the child's background). Titles are
+  unique by validation, so the salt is too. Consequence: `treeHash` (a display-only drift
+  fingerprint) now moves when a component is retitled.
+- **uid re-stamp on update** (live-found on the E2E): the update PUT sends the new `uid`, so the
+  target's `_elementor_component_uid` tracks the tree it actually holds. Without it the deployed
+  uid stayed stale and EVERY later redeploy re-detected "changed tree" and PUT again; with it a
+  second identical deploy reports `reused` (verified live: updated → reused).
+
 **Components 1:1 (SPEC 2.0 — phase 1)** — `defineComponent(fn, {title, props})`: JSX components
 compile to NATIVE registered Elementor components (`elementor_component` CPT) with per-instance
 overridable props; wire formats live-verified against Elementor 4.2.1 + Pro 4.1.0:

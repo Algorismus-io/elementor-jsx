@@ -84,13 +84,21 @@ export function finalizeComponents() {
 export function endComponents() { globalThis[REG_KEY] = null; }
 
 /* ── normalization (shared by definition, sentinel and extraction renders) ──
- * Deterministic walk-order ids (c00000…) so two renders of the same fn produce IDENTICAL trees
+ * Deterministic walk-order ids (c<salt>0000…) so two renders of the same fn produce IDENTICAL trees
  * except where a changed prop landed — the property the sentinel diff and the uid hash both need.
+ * The salt is djb2(title), UNIQUE PER COMPONENT (titles are unique by validation): without it every
+ * component's ids start at c00000 and the LOCAL STYLE ids that embed them collide ACROSS components —
+ * each component ships its own local-<id>.css but the selectors (.e-c00000-s…) are shared, so on any
+ * page rendering two different components the last-enqueued file wins and one component steals the
+ * other's box styles (live-found on the phase-2 E2E: the parent rendered the child's background).
+ * Inner-element DOM ids are per-instance-hashed natively (Format_Component_Elements_Id) — CLASS
+ * names are not, so uniqueness must come from the authored ids, exactly like editor-created
+ * components whose random ids never collide.
  * Also strips the __cls dedup hint (page-only machinery; an unknown key would leak to the server —
  * component trees keep LOCAL styles, they are never routed through extractClasses). */
-function normalizeComponentIds(elements) {
+function normalizeComponentIds(elements, salt = '') {
   let n = 0;
-  const next = () => `c${(n++).toString(36).padStart(5, '0')}`;
+  const next = () => `c${salt}${(n++).toString(36).padStart(4, '0')}`;
   const walk = (node) => {
     const oldId = node.id; const newId = next();
     node.id = newId;
@@ -113,14 +121,14 @@ function normalizeComponentIds(elements) {
 
 /** Render a definition fn to a normalized flat elements array (lazy import dodges the ESM cycle
  * runtime ⇄ component at module-init time; both usages are call-time). */
-function renderFn(fn, props) {
+function renderFn(fn, props, salt = '') {
   // runtime.mjs imports this module (the seam), so a static import of render here would be
   // circular at init. The registered-symbol handoff keeps the import graph one-directional:
   // runtime publishes its render at module init (fresh per bundled copy — always current).
   const _render = globalThis[Symbol.for('exjsx.render')];
   if (!_render) throw new Error('component: runtime render not initialized — import order bug');
   const out = _render({ $$v: true, type: fn, props, children: [] });
-  return normalizeComponentIds((Array.isArray(out) ? out : [out]).filter(isKitNode));
+  return normalizeComponentIds((Array.isArray(out) ? out : [out]).filter(isKitNode), salt);
 }
 
 /* structural signature — same shape ⇒ ids align across renders */
@@ -174,7 +182,7 @@ function mapProp(def, key, title) {
   const sentinel = SENTINEL(key);
   let B;
   try {
-    B = renderFn(def.fn, { ...def.baseProps, [key]: sentinel });
+    B = renderFn(def.fn, { ...def.baseProps, [key]: sentinel }, def.salt);
     if (shapeOf(B) !== def.shape) throw Object.assign(new Error('shape'), { shape: true });
   } catch (e) {
     if (e.shape) {
@@ -197,12 +205,6 @@ function mapProp(def, key, title) {
       `The blessed idiom: bake each visual variant as its OWN registered component (variant prop pattern), ` +
       `or drop defineComponent to keep inline expansion for this component.`);
   }
-  const fwd = diffs.find((d) => d.propKey === 'component_instance');
-  if (fwd) {
-    throw new Error(
-      `component "${title}": prop "${key}" forwards into a NESTED component instance — the overridable(override) chain ` +
-      `envelope is not implemented in phase 1. Pass literal values to the nested component, or flatten the composition.`);
-  }
   if (diffs.length > 1) {
     const where = diffs.map((d) => `<${d.widgetType ?? d.elType}>.${d.propKey}`).join(', ');
     throw new Error(
@@ -214,6 +216,35 @@ function mapProp(def, key, title) {
     throw new Error(
       `component "${title}": prop "${key}" produced a diff at <${d.widgetType ?? d.elType}>.${d.propKey} that does NOT contain ` +
       `the sentinel — the component renders non-deterministically (Date.now()/random?); registered components must be pure.`);
+  }
+  /* PROP FORWARDING (spec §3/§4, phase 2): the prop lands inside a NESTED component instance's
+   * component_instance envelope — locate WHICH child override key it feeds. The chain wire shape
+   * (editor createOverrideValue / resolve-overrides-chain, verified 4.2.1) wraps that child
+   * override in the overridable envelope keyed by OUR prop; here we only identify the landing. */
+  if (d.propKey === 'component_instance') {
+    const aOvs = d.aVal?.value?.overrides?.value || [];
+    const bOvs = d.bVal?.value?.overrides?.value || [];
+    const aBy = new Map(aOvs.map((o) => [o.value.override_key, o]));
+    const changed = bOvs.filter((o) => stable(aBy.get(o.value.override_key)) !== stable(o));
+    const dropped = aOvs.filter((o) => !bOvs.some((b) => b.value.override_key === o.value.override_key));
+    if (changed.length !== 1 || dropped.length) {
+      throw new Error(
+        `component "${title}": prop "${key}" changes ${changed.length + dropped.length} override(s) on a nested component ` +
+        `instance — forwarding must feed exactly ONE declared prop of the nested component.`);
+    }
+    const hit = changed[0];
+    if (!stable(hit.value.override_value).includes(sentinel)) {
+      throw new Error(
+        `component "${title}": prop "${key}" diffs a nested instance override ("${hit.value.override_key}") that does NOT ` +
+        `contain the sentinel — the component renders non-deterministically; registered components must be pure.`);
+    }
+    if (!aBy.has(hit.value.override_key)) {
+      throw new Error(
+        `component "${title}": prop "${key}" forwards into the nested component's "${hit.value.override_key}" but the ` +
+        `DEFAULT render passes no value for it — give "${key}" a default (props meta \`default\` or a JS param default) ` +
+        `so the chain has a baseline origin value.`);
+    }
+    return { elementId: d.elementId, propKey: d.propKey, elType: d.elType, widgetType: d.widgetType, innerKey: hit.value.override_key };
   }
   return { elementId: d.elementId, propKey: d.propKey, elType: d.elType, widgetType: d.widgetType };
 }
@@ -231,9 +262,10 @@ function ensureRegistered(wrapper, reg) {
   try {
     const baseProps = {};
     for (const [k, m] of Object.entries(propsMeta)) if (m.default !== undefined) baseProps[k] = m.default;
-    const rawElements = renderFn(fn, baseProps);      // tree A — the canonical definition render
+    const salt = djb2(title);                              // per-component id salt (see normalizeComponentIds)
+    const rawElements = renderFn(fn, baseProps, salt);     // tree A — the canonical definition render
     assertAtomicOnly(rawElements, title);
-    const def = { fn, title, propsMeta, baseProps, rawElements, shape: shapeOf(rawElements), map: {} };
+    const def = { fn, title, propsMeta, baseProps, rawElements, salt, shape: shapeOf(rawElements), map: {} };
 
     // sentinel-diff every declared prop, then wrap the landings + build the registry
     const props = {}; const groups = { items: {}, order: [] };
@@ -242,16 +274,36 @@ function ensureRegistered(wrapper, reg) {
     const elements = JSON.parse(JSON.stringify(rawElements));
     for (const [key, m] of Object.entries(propsMeta)) {
       const t = mapProp(def, key, title);
-      const tk = `${t.elementId} ${t.propKey}`;
+      const tk = `${t.elementId} ${t.propKey} ${t.innerKey || ''}`;
       if (byTarget.has(tk)) {
         throw new Error(`component "${title}": props "${byTarget.get(tk)}" and "${key}" both land in <${t.widgetType ?? t.elType}>.${t.propKey} — one settings prop can carry only one override; merge them into a single prop`);
       }
       byTarget.set(tk, key);
       def.map[key] = t;
       const el = findById(elements, t.elementId);
-      const originValue = el.settings[t.propKey];
-      // the overridable envelope (verified 4.2.1: universal-by-union on every atomic settings prop except classes)
-      el.settings[t.propKey] = { $$type: 'overridable', value: { override_key: key, origin_value: originValue } };
+      let originValue; let originPropFields = null;
+      if (t.innerKey) {
+        /* FORWARDED prop → the chain envelope (verified 4.2.1, editor createOverrideValue): the
+         * nested instance's override item for the child key is WRAPPED in overridable keyed by OUR
+         * prop; the registry keeps the UNWRAPPED baseline as originValue (editor
+         * resolveOverridePropValue parity) plus originPropFields pointing at the true landing
+         * element INSIDE the child (a forwarding child's own originPropFields carries through, so
+         * deeper chains stay resolvable level by level — resolve-overrides-chain semantics). */
+        const ovs = el.settings.component_instance.value.overrides.value;
+        const idx = ovs.findIndex((o) => o.value.override_key === t.innerKey);
+        const inner = ovs[idx];
+        originValue = inner.value.override_value;
+        ovs[idx] = { $$type: 'overridable', value: { override_key: key, origin_value: inner } };
+        const childDef = [...reg.defs.values()].find((cd) => cd.uid === el.editor_settings?.component_uid);
+        const childEntry = childDef?.overridable_props?.props?.[t.innerKey];
+        if (!childEntry) throw new Error(`component "${title}": prop "${key}" forwards to "${t.innerKey}" but the nested component's registry has no such prop (bug; please report)`);
+        originPropFields = childEntry.originPropFields
+          ?? { elType: childEntry.elType, widgetType: childEntry.widgetType, propKey: childEntry.propKey, elementId: childEntry.elementId };
+      } else {
+        originValue = el.settings[t.propKey];
+        // the overridable envelope (verified 4.2.1: universal-by-union on every atomic settings prop except classes)
+        el.settings[t.propKey] = { $$type: 'overridable', value: { override_key: key, origin_value: originValue } };
+      }
       const groupLabel = m.group || 'Props';
       const gid = slug(groupLabel);
       if (!groups.items[gid]) { groups.items[gid] = { id: gid, label: groupLabel, props: [] }; groups.order.push(gid); }
@@ -259,6 +311,8 @@ function ensureRegistered(wrapper, reg) {
       props[key] = {
         overrideKey: key, label: m.label || key, elementId: t.elementId, propKey: t.propKey,
         elType: t.elType, ...(t.widgetType ? { widgetType: t.widgetType } : {}), originValue, groupId: gid,
+        // forwarded props only: where the chain ultimately lands (the parser stores null otherwise)
+        ...(originPropFields ? { originPropFields } : {}),
       };
     }
     def.elements = elements;
@@ -295,14 +349,18 @@ export function emitComponentInstance(wrapper, props = {}, children = []) {
   // component would produce — the override_value is read from the mapped (elementId, propKey).
   const overrides = [];
   if (passed.length) {
-    const E = renderFn(def.fn, { ...def.baseProps, ...Object.fromEntries(passed.map((k) => [k, props[k]])) });
+    const E = renderFn(def.fn, { ...def.baseProps, ...Object.fromEntries(passed.map((k) => [k, props[k]])) }, def.salt);
     if (shapeOf(E) !== def.shape) {
       throw new Error(`component "${title}": this invocation's props change the rendered structure — per-instance structure cannot vary; only declared settings props can`);
     }
     for (const k of passed) {
       const m = def.map[k];
       const el = findById(E, m.elementId);
-      const val = el?.settings?.[m.propKey];
+      // FORWARDED prop: the landing is a nested instance's override for the child key — the
+      // extraction render's child emission already produced the exact override_value envelope.
+      const val = m.innerKey
+        ? el?.settings?.component_instance?.value?.overrides?.value?.find((o) => o.value.override_key === m.innerKey)?.value?.override_value
+        : el?.settings?.[m.propKey];
       if (val === undefined) throw new Error(`component "${title}": could not extract prop "${k}" from the instance render — mapping drifted (bug; please report)`);
       overrides.push({
         $$type: 'override',
@@ -345,7 +403,13 @@ export function rewriteComponentIds(elements, uidToId) {
         const ci = n.settings?.component_instance?.value;
         if (ci) {
           ci.component_id = { $$type: 'number', value: id };
-          for (const o of ci.overrides?.value || []) o.value.schema_source = { type: 'component', id };
+          for (const o of ci.overrides?.value || []) {
+            // chain items (overridable-wrapping-override, prop forwarding) carry the schema_source
+            // on the WRAPPED override — same id (Component_Instance_Prop_Type checks both against
+            // component_id); plain overrides carry it directly.
+            if (o.$$type === 'overridable') o.value.origin_value.value.schema_source = { type: 'component', id };
+            else o.value.schema_source = { type: 'component', id };
+          }
         }
       }
       walk(n.elements);
@@ -390,6 +454,20 @@ export function expandInstances(elements, componentsByUid) {
     const copy = JSON.parse(JSON.stringify(comp.elements));
     (function unwrap(ms) {
       for (const m of ms || []) {
+        // CHAIN resolution (prop forwarding — Overridable_Transformer parity): a nested instance's
+        // overridable-wrapped override resolves to its inner override, with the OUTER instance's
+        // value (when provided) carried onto the inner key — so the recursive expand below then
+        // applies plain overrides only. override_value:null carries through as an explicit clear.
+        const novs = m.settings?.component_instance?.value?.overrides?.value;
+        if (novs) {
+          m.settings.component_instance.value.overrides.value = novs.map((item) => {
+            if (item.$$type !== 'overridable') return item;
+            const inner = item.value.origin_value;                    // the baseline override envelope
+            const ov = byKey[item.value.override_key];
+            if (!ov) return inner;
+            return { ...inner, value: { ...inner.value, override_value: ov.override_value } };
+          });
+        }
         for (const [k, v] of Object.entries(m.settings || {})) {
           if (v?.$$type === 'overridable') {
             const ov = byKey[v.value.override_key];
