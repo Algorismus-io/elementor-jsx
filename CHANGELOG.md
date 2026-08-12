@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+**SPEC 2.0 components — PHASE 3: the decompile round trip.** `e-component` instances used to fall
+into the `<Raw>` verbatim branch; they now invert all the way back to source.
+
+- **`decompile.mjs`**: `widgetType === 'e-component'` is intercepted BEFORE the Raw fallback. Each
+  referenced component document is emitted ONCE as an exported `defineComponent(fn, {title, props})`
+  above the page (single-module output), and every usage becomes `<PriceCard plan={"Pro"}/>` built
+  from that instance's `override` envelopes. The definition's parameters, their `label`/`group` and
+  their defaults are reconstructed from the `_elementor_component_overridable_props` registry;
+  overridable settings envelopes are unwrapped and their landings emitted as the PARAMETER
+  (`<heading>{plan}</heading>`). A nested instance carrying the `overridable`-wrapping-`override`
+  chain decompiles to prop FORWARDING from the enclosing component's own parameter
+  (`<PriceCard plan={tier}/>`), and definitions are emitted in dependency order.
+  New exports: `componentIdsIn`, `resolveComponents`, `siteComponentFetcher`, `analyzeComponents`,
+  `identFromLabel`, `componentIdent`, `valueLiteral`; `decompile()` gained `{components, warnings}`.
+- **The fetcher is INJECTABLE** (`resolveComponents(tree, fetchComponent)`) so tests need no live
+  site. The live one (`siteComponentFetcher`) reads the native `elementor/v1/components` list +
+  `…/components/overridable-props` and falls back to the ultra list; the element tree comes from
+  `elementor-ultra/v1/documents/{id}` because **Elementor exposes no native component-tree route**.
+- **Nothing is ever forced.** A component that fails to fetch, returns no registry, overrides a prop
+  with no JSX spelling (media, form actions), carries a non-literal baseline, or whose instance has
+  its own styles/settings keeps the exact pre-phase-3 `<Raw>` passthrough — with a warning collected
+  into `warnings` and emitted as `// warn:` header comments. A decompile never crashes on this.
+- **Inner ids are derived** (per-instance djb2/base36 hash — verified live: rendered `data-id`s are
+  7-char hashes, never the authored ones), so every lookup keys on `origin_id` / the component
+  document's own ids.
+- **`props.<k>.key` on `defineComponent`** — decouples the WIRE override key from the JS parameter
+  name. Needed because an editor-authored registry can use override keys that are not valid JS
+  identifiers: the decompiler then derives the parameter from the LABEL and carries the original key,
+  so the recompiled registry and every override envelope keep Elementor's exact keys.
+- **`exjsx decompile` CLI**: `--page <id>` pulls the tree straight off `WP_URL`, `--components`
+  resolves the component documents (implied by `--page`); warnings print to stderr.
+- **Fix (E2E-found)**: the stale-component warning printed the LOCAL uid on both sides of the `≠`
+  when an update degraded to reuse (the plan item's `uid` is the local fingerprint) — it now prints
+  the deployed uid.
+- Round-trip integrity is a test: `defineComponent` → compile → deploy-rewrite → decompile →
+  recompile reproduces the same component uids, tree hashes, registries, trees and instance
+  overrides. Verified live on Elementor 4.2.1 + Pro 4.1.0 too, with one documented divergence: the
+  uid fingerprints the AUTHORED tree while the site stores the version-ADAPTED one
+  (`border-radius` → `border-radius-v2` on 4.2.1), so a decompile → redeploy reads as a component
+  UPDATE rather than a no-op. Applying the deploy adapter to the original makes the uids identical.
+
 **1.9.2 field report — seven defects from two recorded builds on 1.9.1.**
 
 - **Pro form helpers no longer strand orphan pages (HIGHEST)** — `form()/field()/formSubmit()/

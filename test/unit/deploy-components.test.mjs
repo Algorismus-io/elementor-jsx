@@ -210,6 +210,9 @@ test('deploy: stale component + NO ultra route → v1 warn-and-reuse semantics (
   const report = await deployBundle({ ...bundle, pages: [] }, { wpUrl: WP });
   assert.deepEqual(report.components, [{ uid: local.uid, title: 'Ladder Card', id: 55, action: 'reused-stale' }]);
   assert.match(report.componentWarnings[0], /local tree CHANGED since last deploy/);
+  // the ≠ must show the DEPLOYED uid, not repeat the local one (the degrade path passes a plan
+  // item whose `uid` is the local fingerprint — it printed the same uid twice; E2E-found)
+  assert.match(report.componentWarnings[0], new RegExp(`local uid ${local.uid}.*≠ deployed uid x-deployed-old`));
   assert.match(report.componentWarnings[0], /install\/upgrade the elementor-ultra-mcp plugin/);
   assert.equal(calls.some((c) => c.method === 'PUT'), false, 'no PUT attempted');
 });

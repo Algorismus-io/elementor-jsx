@@ -16,6 +16,9 @@
  *     breakpoints. The two e-- class states (e--selected/e--disabled) have no JSX spelling, so a
  *     node carrying one round-trips verbatim as <Raw> (zero loss, kit-only territory).
  *   - settings.attributes (the key-value envelope) inverts to attrs={{…}}.
+ *   - NATIVE COMPONENTS (SPEC 2.0 phase 3): an `e-component` instance inverts to
+ *     `<PriceCard plan="Pro"/>` and the referenced component document is emitted ONCE as an
+ *     exported `defineComponent(…)` above the page — see the components block below.
  */
 
 const b64d = (s) => Buffer.from(s, 'base64').toString('utf8');
@@ -208,10 +211,335 @@ function invertMotionItem(item) {
 const htmlV3 = (v) => (v?.$$type === 'html-v3' ? (v.value?.content?.value ?? '') : (v?.value ?? ''));
 const stringV = (v) => (v && typeof v === 'object' ? v.value : v);
 
+/* ═══════════ native components — SPEC 2.0 phase 3 (the inverse of component.mjs) ═══════════
+ *
+ * A page that uses registered components stores `e-component` INSTANCE nodes: a component_id, an
+ * overrides array, and NOTHING else (the inner tree lives in the component document and is rendered
+ * server-side). Inverting one therefore needs a second source — the component document's element
+ * tree + its `_elementor_component_overridable_props` registry — which arrives through an
+ * INJECTABLE fetcher (`resolveComponents`), so tests never need a live site.
+ *
+ * The inversion, per referenced component:
+ *   tree      → the `defineComponent(fn, {title, props})` body, emitted ONCE above the page;
+ *   registry  → the fn's destructured parameters (names derived from the override keys when those
+ *               are already valid identifiers — that keeps exjsx-authored uids byte-stable — else
+ *               from the LABEL, with `key:` carrying the original wire key), their `label`/`group`
+ *               and their defaults (registry `originValue`);
+ *   instances → `<PriceCard plan="Pro"/>` built from each `override` envelope, and — for an
+ *               instance nested INSIDE another component — `overridable`-wrapping-`override` (the
+ *               chain) → prop FORWARDING from the enclosing component's own parameter.
+ *
+ * Inner element ids are DERIVED at render (djb2/base36 of instanceId+origin path, spec §7), so every
+ * lookup keys on `origin_id` when present and never on a rendered id.
+ *
+ * Anything that cannot be spelled in JSX (an override landing on a prop with no JSX surface, a
+ * non-literal default, an instance carrying its own styles, a component that failed to fetch) is
+ * NOT forced: the component is skipped with a warning and its instances keep the verbatim `<Raw>`
+ * passthrough — zero loss, exactly as before phase 3.
+ */
+
+/** Rendered inner ids are per-instance hashes; `origin_id` is the stable key (spec §7). */
+const idOf = (n) => n.origin_id ?? n.id;
+
+/** Distinct component ids an element tree references (one level — see resolveComponents). */
+export function componentIdsIn(elements) {
+  const ids = new Set();
+  (function walk(ns) {
+    for (const n of ns || []) {
+      if (n.widgetType === 'e-component') {
+        const v = Number(n.settings?.component_instance?.value?.component_id?.value);
+        if (Number.isFinite(v) && v > 0) ids.add(v);
+      }
+      walk(n.elements);
+    }
+  })(elements);
+  return [...ids];
+}
+
+/**
+ * Resolve every component a tree references, TRANSITIVELY (components compose components).
+ * `fetchComponent(id)` is injectable — any `(id) => {title, elements, overridable_props}` (or null).
+ * A fetch that throws or answers nothing is a WARNING, never a crash: those instances stay `<Raw>`.
+ */
+export async function resolveComponents(elements, fetchComponent, { warn = () => {} } = {}) {
+  const out = {}; const seen = new Set();
+  const queue = componentIdsIn(elements);
+  while (queue.length) {
+    const id = queue.shift();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    let doc = null;
+    try { doc = await fetchComponent(id); } catch (e) {
+      warn(`component ${id}: fetch failed (${String(e?.message || e).slice(0, 140)}) — its instances stay <Raw>`);
+      continue;
+    }
+    if (!doc || !Array.isArray(doc.elements)) {
+      warn(`component ${id}: no element tree returned — its instances stay <Raw>`);
+      continue;
+    }
+    out[id] = { id, ...doc };
+    queue.push(...componentIdsIn(doc.elements));
+  }
+  return out;
+}
+
+/**
+ * The LIVE fetcher (used by `exjsx decompile --url`): native routes first, ultra route as fallback.
+ *   list      GET elementor/v1/components                        → [{id, name, uid}]   (ultra twin)
+ *   registry  GET elementor/v1/components/overridable-props?…    → {data:{<id>:{props,groups}}}
+ *   tree      GET elementor-ultra/v1/documents/<id>              → {data:{elements}}
+ * The tree read has NO native twin — Elementor exposes list/styles/overridable-props only, so the
+ * elementor-ultra-mcp plugin's document route is the one way to read a component's elements over
+ * REST. Without it the registry alone cannot rebuild a definition and instances stay <Raw>.
+ */
+export function siteComponentFetcher({ url, auth, fetch: F = globalThis.fetch, warn = () => {} } = {}) {
+  const base = String(url || '').replace(/\/$/, '');
+  const head = auth ? { Authorization: auth } : {};
+  const json = async (u) => { const r = await F(u, { headers: head }); return r.ok ? r.json().catch(() => null) : null; };
+  let listP = null;
+  const list = () => (listP ??= (async () => {
+    const j = await json(`${base}/wp-json/elementor/v1/components`) || await json(`${base}/wp-json/elementor-ultra/v1/components`);
+    const rows = Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [];
+    return new Map(rows.map((r) => [Number(r.id ?? r.component_id ?? r.post_id), r]));
+  })());
+  return async (id) => {
+    const row = (await list()).get(Number(id));
+    const props = await json(`${base}/wp-json/elementor/v1/components/overridable-props?componentIds%5B%5D=${encodeURIComponent(id)}`);
+    const doc = await json(`${base}/wp-json/elementor-ultra/v1/documents/${encodeURIComponent(id)}`);
+    const elements = doc?.data?.elements ?? doc?.elements;
+    if (!Array.isArray(elements)) {
+      warn(`component ${id}: elementor-ultra/v1/documents/${id} returned no tree (plugin missing? Elementor exposes no native component-tree route)`);
+      return null;
+    }
+    return {
+      title: row?.title ?? row?.name ?? `Component ${id}`,
+      uid: row?.uid ?? row?.component_uid,
+      elements,
+      overridable_props: props?.data?.[String(id)] ?? props?.data?.[id] ?? null,
+    };
+  };
+}
+
+/* ── label → JS identifier ── */
+const IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+/* reserved words + the names defineComponent itself refuses per instance (`theme`, `children`) */
+const RESERVED = new Set(('break case catch class const continue debugger default delete do else enum export extends false finally '
+  + 'for function if implements import in instanceof interface let new null package private protected public return static super '
+  + 'switch this throw true try typeof var void while with yield await async arguments eval theme children').split(' '));
+/** unicode → ASCII words: NFKD + strip combining marks, then split on everything else. */
+const words = (s) => String(s ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^A-Za-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+const uniq = (base, taken) => {
+  let out = base; let i = 2;
+  while (taken.has(out)) out = `${base}${i++}`;
+  taken.add(out);
+  return out;
+};
+/** 'Plan name' → planName · 'CTA label' → ctaLabel · '2 col' → _2Col · 'Prix Élevé' → prixEleve. */
+export function identFromLabel(label, taken = new Set(), fallback = 'prop') {
+  const w = words(label);
+  let base = w.length ? w[0].toLowerCase() + w.slice(1).map((x) => x[0].toUpperCase() + x.slice(1)).join('') : '';
+  if (/^[0-9]/.test(base)) base = `_${base}`;
+  if (!base) base = fallback;
+  if (RESERVED.has(base)) base = `${base}Prop`;
+  return uniq(base, taken);
+}
+/** 'P3 Price Card' → P3PriceCard · '404 block' → C404Block. */
+export function componentIdent(title, taken = new Set()) {
+  const w = words(title);
+  let base = w.map((x) => x[0].toUpperCase() + x.slice(1)).join('');
+  if (/^[0-9]/.test(base)) base = `C${base}`;
+  if (!base || RESERVED.has(base)) base = 'Component';
+  return uniq(base, taken);
+}
+
+/* ── typed value → a JSX-expressible JS literal, or null when it isn't one ── */
+export function valueLiteral(v) {
+  if (v === null) return 'null';
+  if (v === undefined) return null;
+  if (typeof v === 'string') return q(v);
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (typeof v !== 'object') return null;
+  switch (v.$$type) {
+    case 'html-v3': return q(String(v.value?.content?.value ?? ''));
+    case 'string': return typeof v.value === 'string' ? q(v.value) : null;
+    case 'number': return typeof v.value === 'number' ? String(v.value) : null;
+    case 'boolean': return typeof v.value === 'boolean' ? String(v.value) : null;
+    case 'url': return typeof v.value === 'string' ? q(v.value) : null;
+    case 'link': { const d = v.value?.destination; return typeof d?.value === 'string' ? q(d.value) : null; }
+    default: return null;
+  }
+}
+
+/* settings props that HAVE a JSX spelling, per element type — an override landing anywhere else
+ * (an image envelope, a form action, a Raw-only widget) cannot be re-authored as a prop. */
+const LANDINGS = {
+  'e-heading': ['title'],
+  'e-paragraph': ['paragraph'],
+  'e-button': ['text', 'link'],
+  'e-component': ['component_instance'],
+};
+
+/** One fetched component document → everything the emitter needs (or `{invertible:false, reason}`). */
+function analyzeComponent(raw, names) {
+  const title = String(raw.title || `Component ${raw.id}`);
+  const name = componentIdent(title, names);
+  const reg = raw.overridable_props?.props || null;
+  const groups = raw.overridable_props?.groups?.items || {};
+  const out = { id: Number(raw.id), title, name, uid: raw.uid, params: {}, meta: {}, order: [], paramAt: new Map(), elements: [], invertible: false, reason: null };
+  if (!reg) { out.reason = 'no overridable-props registry returned (GET /components/overridable-props)'; return out; }
+
+  // deep-copy, then UNWRAP every `overridable` settings envelope back to its origin value while
+  // recording where each override key landed (id keyed on origin_id — rendered ids are derived).
+  const elements = JSON.parse(JSON.stringify(raw.elements || []));
+  const landing = new Map();
+  (function walk(ns) {
+    for (const n of ns || []) {
+      for (const [k, v] of Object.entries(n.settings || {})) {
+        if (v?.$$type === 'overridable') {
+          landing.set(v.value?.override_key, { elementId: idOf(n), propKey: k, type: n.widgetType ?? n.elType, origin: v.value?.origin_value });
+          n.settings[k] = v.value?.origin_value;
+        }
+      }
+      // CHAIN: a nested instance's forwarded override rides inside the overrides array, not settings
+      for (const item of n.settings?.component_instance?.value?.overrides?.value || []) {
+        if (item?.$$type === 'overridable') {
+          landing.set(item.value?.override_key, { elementId: idOf(n), propKey: 'component_instance', type: 'e-component', origin: item.value?.origin_value?.value?.override_value });
+        }
+      }
+      walk(n.elements);
+    }
+  })(elements);
+
+  // two passes so a label-derived name can never steal an override key that IS an identifier
+  const taken = new Set();
+  const keys = Object.keys(reg);
+  for (const k of keys) if (IDENT_RE.test(k) && !RESERVED.has(k)) taken.add(k);
+  for (const k of keys) {
+    const e = reg[k] || {};
+    const L = landing.get(k);
+    if (!L) { out.reason = `registered prop "${k}" does not appear in the component tree (registry/tree out of sync)`; return out; }
+    if (!(LANDINGS[L.type] || []).includes(L.propKey)) {
+      out.reason = `prop "${k}" overrides <${L.type}>.${L.propKey}, which has no JSX spelling`;
+      return out;
+    }
+    const def = valueLiteral(e.originValue ?? L.origin);
+    if (def == null) {
+      out.reason = `prop "${k}" has a baseline value (${e.originValue?.$$type ?? typeof e.originValue}) with no JS literal form`;
+      return out;
+    }
+    const param = (IDENT_RE.test(k) && !RESERVED.has(k)) ? k : identFromLabel(e.label || k, taken);
+    out.params[k] = param;
+    out.order.push(param);
+    out.meta[param] = { label: e.label || k, group: groups[e.groupId]?.label, key: param === k ? null : k, def };
+    const at = out.paramAt.get(L.elementId) || {};
+    at[L.propKey] = param;
+    out.paramAt.set(L.elementId, at);
+  }
+  out.elements = elements;
+  out.invertible = true;
+  return out;
+}
+
+/** All fetched documents → the emitter's component context (invertible ones only; rest are warned). */
+export function analyzeComponents(docs = {}, warn = () => {}) {
+  const names = new Set(); const out = {};
+  for (const [id, raw] of Object.entries(docs)) {
+    if (!raw) continue;
+    const c = analyzeComponent({ ...raw, id: raw.id ?? Number(id) }, names);
+    if (!c.invertible) {
+      names.delete(c.name);
+      warn(`component "${c.title}" (id ${c.id}): ${c.reason} — its instances stay <Raw> (verbatim, zero loss)`);
+      continue;
+    }
+    out[Number(id)] = c;
+  }
+  return out;
+}
+
+/** One `e-component` instance node → `<PriceCard plan={"Pro"}/>`, or null → caller emits <Raw>. */
+function emitInstance(n, pad, ctx) {
+  const cid = Number(n.settings?.component_instance?.value?.component_id?.value);
+  const c = ctx.components?.[cid];
+  if (!c) return null;
+  // instances render the REGISTERED tree: an instance carrying its own styles/classes/extra settings
+  // has no JSX spelling (defineComponent invocations take declared props only) → verbatim <Raw>.
+  const extra = Object.keys(n.settings || {}).filter((k) => k !== 'component_instance');
+  if (extra.length || Object.keys(n.styles || {}).length) {
+    ctx.warn(`instance of "${c.title}" (${n.id}) carries ${extra.length ? `extra settings (${extra.join(', ')})` : 'local styles'} — kept as <Raw>`);
+    return null;
+  }
+  const attrs = [];
+  for (const item of n.settings.component_instance.value?.overrides?.value || []) {
+    if (item?.$$type === 'override') {
+      const p = c.params[item.value?.override_key];
+      if (!p) { ctx.warn(`instance of "${c.title}" (${n.id}): override "${item.value?.override_key}" is not in the component registry — dropped (Elementor drops it too)`); continue; }
+      const lit = valueLiteral(item.value?.override_value);
+      if (lit == null) { ctx.warn(`instance of "${c.title}" (${n.id}): override "${item.value?.override_key}" carries a ${item.value?.override_value?.$$type} envelope with no JS literal — kept as <Raw>`); return null; }
+      attrs.push(`${p}={${lit}}`);
+    } else if (item?.$$type === 'overridable') {
+      // the CHAIN: this instance sits inside a component that forwards its own prop into it
+      const inner = item.value?.origin_value;
+      const childParam = c.params[inner?.value?.override_key];
+      const outerParam = ctx.current?.params?.[item.value?.override_key];
+      if (!childParam || !outerParam) { ctx.warn(`instance of "${c.title}" (${n.id}): unresolvable forwarding chain (${item.value?.override_key} → ${inner?.value?.override_key}) — kept as <Raw>`); return null; }
+      attrs.push(`${childParam}={${outerParam}}`);
+    } else { ctx.warn(`instance of "${c.title}" (${n.id}): unknown override envelope ${item?.$$type} — kept as <Raw>`); return null; }
+  }
+  return `${pad}<${c.name}${attrs.length ? ` ${attrs.join(' ')}` : ''} />`;
+}
+
+/** One analyzed component → its `export const X = defineComponent(…)` source. */
+function emitComponentSource(c, ctx) {
+  const cctx = { ...ctx, current: c, paramAt: c.paramAt };
+  const body = c.elements.map((n) => emitNode(n, 2, cctx)).join(',\n');
+  const params = c.order.map((p) => `${p} = ${c.meta[p].def}`).join(', ');
+  const propsSrc = c.order.map((p) => {
+    const m = c.meta[p];
+    const bits = [`label: ${q(m.label)}`];
+    if (m.group) bits.push(`group: ${q(m.group)}`);
+    if (m.key) bits.push(`key: ${q(m.key)}`);   // wire override key ≠ JS parameter name
+    return `      ${p}: { ${bits.join(', ')} },`;
+  }).join('\n');
+  const fnBody = c.elements.length === 1 ? `(\n${body}\n  )` : `[\n${body}\n  ]`;
+  return `export const ${c.name} = defineComponent(
+  ({ ${params} }) => ${fnBody},
+  {
+    title: ${q(c.title)},
+    props: {
+${propsSrc}
+    },
+  },
+);`;
+}
+
+/** Definition sources in dependency order (a component is emitted after the ones it composes). */
+function emitComponentSources(components, ctx) {
+  const all = Object.values(components);
+  const done = new Set(); const src = [];
+  let left = [...all];
+  while (left.length) {
+    const ready = left.filter((c) => componentIdsIn(c.elements).every((d) => !components[d] || done.has(d) || d === c.id));
+    const level = ready.length ? ready : left;    // cycles are impossible server-side; never loop forever
+    for (const c of level) { src.push(emitComponentSource(c, ctx)); done.add(c.id); }
+    left = left.filter((c) => !level.includes(c));
+  }
+  return src;
+}
+
 /* ── one node → JSX source lines ── */
 function emitNode(n, ind, ctx) {
   const pad = '  '.repeat(ind);
   const s = n.settings || {};
+  // COMPONENT INSTANCE (phase 3) — intercepted BEFORE the widget/Raw fallbacks; a null means the
+  // instance isn't invertible (unresolved component, exotic override) and <Raw> takes over below.
+  if (n.widgetType === 'e-component') {
+    const inst = emitInstance(n, pad, ctx || {});
+    if (inst) return inst;
+  }
+  // inside a defineComponent body, the props the registry marks overridable are emitted as the
+  // function's PARAMETERS instead of their baseline literals (keyed on origin_id — spec §7)
+  const param = (propKey) => ctx?.paramAt?.get(idOf(n))?.[propKey];
   const classes = (s.classes?.value || []).filter((c) => String(c).startsWith('g-')); // global refs → cls
   const styleId = (s.classes?.value || []).find((c) => /^e-.*-s\d*$/.test(c) || (n.styles && n.styles[c]));
   const styleObj = styleId && n.styles ? n.styles[styleId] : (n.styles ? Object.values(n.styles)[0] : null);
@@ -289,7 +617,7 @@ function emitNode(n, ind, ctx) {
     attrs.push(`motion={${srcs.length === 1 ? srcs[0] : `[${srcs.join(', ')}]`}}`);
   }
   const link = s.link?.value?.href || s.link?.href || (s.link?.value?.destination);
-  if (link) attrs.push(`href={${q(typeof link === 'object' ? (link.value || '') : link)}}`);
+  if (link) attrs.push(`href={${param('link') ?? q(typeof link === 'object' ? (link.value || '') : link)}}`);
   for (const [k, val] of Object.entries(sxSrc)) attrs.push(k === 'center' ? 'center' : `${k}={${val}}`);
   if (Object.keys(bp).length) for (const [t, o] of Object.entries(bp)) {
     const parts = Object.entries(o).filter(([k]) => k !== '__raw').map(([k, val]) => `${k === 'center' ? 'center: true' : `${k.replace(/^_/, '')}: ${val}`}`);
@@ -310,13 +638,13 @@ function emitNode(n, ind, ctx) {
     const tagA = (tag && tag !== 'h2') ? `tag={${q(tag)}}` : '';
     // dynamic-bound content round-trips via dyn={…} (htmlV3() used to flatten it to '' — data loss)
     if (isDynV(s.title)) return `${pad}<heading ${A(tagA)} dyn={${JSON.stringify(s.title)}} />`;
-    return `${pad}<heading ${A(tagA)}>{${q(htmlV3(s.title))}}</heading>`;
+    return `${pad}<heading ${A(tagA)}>{${param('title') ?? q(htmlV3(s.title))}}</heading>`;
   }
   if (w === 'e-paragraph') {
     if (isDynV(s.paragraph)) return `${pad}<text ${A()} dyn={${JSON.stringify(s.paragraph)}} />`;
-    return `${pad}<text ${A()}>{${q(htmlV3(s.paragraph))}}</text>`;
+    return `${pad}<text ${A()}>{${param('paragraph') ?? q(htmlV3(s.paragraph))}}</text>`;
   }
-  if (w === 'e-button') return `${pad}<Button text={${q(htmlV3(s.text))}} ${A()} />`;
+  if (w === 'e-button') return `${pad}<Button text={${param('text') ?? q(htmlV3(s.text))}} ${A()} />`;
   if (w === 'e-image') { const id = s.image?.value?.src?.value?.id?.value; return `${pad}<img src={${id ?? 0}} ${A()} />`; }
   // widget label rides INSIDE the expression braces — a sibling {/*…*/} block is valid JSX-children
   // syntax but INVALID JS when the node sits at the top-level array (caught by the test suite).
@@ -338,17 +666,34 @@ function emitNode(n, ind, ctx) {
   return `${pad}<${Tag} ${A(tagAttr)}>\n${kids}\n${pad}</${Tag}>`;
 }
 
-/** Decompile a tree (array of top-level elements) → a full .jsx module source string. */
-export function decompile(tree, { name = 'page', slug = 'page' } = {}) {
+/**
+ * Decompile a tree (array of top-level elements) → a full .jsx module source string.
+ * `components`: the fetched component documents keyed by component id (see `resolveComponents` /
+ * `siteComponentFetcher`) — each referenced one is emitted ONCE as an exported `defineComponent`
+ * ABOVE the page (single-module output, so the file stays copy-pasteable); without them,
+ * `e-component` instances keep the verbatim `<Raw>` passthrough.
+ * `warnings`: pass an array to collect what could not be inverted (also emitted as header comments).
+ */
+export function decompile(tree, { name = 'page', slug = 'page', components = {}, warnings } = {}) {
+  const warns = warnings || [];
+  const warn = (m) => { if (!warns.includes(m)) warns.push(m); };
+  const analyzed = analyzeComponents(components, warn);
+  const ctx = { components: analyzed, warn, current: null, paramAt: null };
+  const defs = emitComponentSources(analyzed, ctx);
   // top-level siblings live in a JS ARRAY — they need commas (multi-root trees used to emit
   // invalid JS; single-root pages never hit it — caught by the test suite).
-  const body = tree.map((n) => emitNode(n, 3, {})).join(',\n');
+  const body = tree.map((n) => emitNode(n, 3, ctx)).join(',\n');
   return `import { defineSite } from '../../src/site.mjs';
-import { Button, Raw } from '../../src/dcmp.mjs';
+import { Button, Raw } from '../../src/dcmp.mjs';${defs.length ? `\nimport { defineComponent } from '../../src/component.mjs';` : ''}
 /* Decompiled from _elementor_data by exjsx decompile. Structure + local styles are inverted to
    sx/raw; global classes are kept as cls refs (defined in the sidecar classes file); anything the
    shorthand can't express is preserved verbatim in props={{…}}. Edit freely, then rebuild. */
-
+${warns.length ? `${warns.map((w) => `// warn: ${w}`).join('\n')}\n` : ''}${defs.length ? `
+/* Native Elementor components (SPEC 2.0): each definition below is the component DOCUMENT this
+   page's e-component instances point at — edit it once, every instance follows. Props are the
+   registry's overridable props (label/group as the editor shows them). */
+${defs.join('\n\n')}
+` : ''}
 export const ${name} = () => [
 ${body}
 ];
