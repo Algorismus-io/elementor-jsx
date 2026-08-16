@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.0.1
+
+**Fix: `--inline` pages that also use `defineComponent` had their raw CSS applied to the wrong
+elements.** An inline build emits a `<style>` carrier whose selectors are style ids, and style ids
+embed element ids. When a deploy cannot create native components (free Elementor, no ultra route) it
+inline-expands them and re-runs `normalizeIds`, which renumbers the whole tree — after which every
+carrier rule still selected the id it was built for and therefore hit a *different* element. The
+symptom is silent and severe: a hero's `text-[20vw]` landing on the 12px eyebrow above it, dropped
+colour treatments, panels losing their overflow rules, images escaping their containers. Pages
+without `defineComponent`, and non-inline builds, were never affected.
+
+- `inline.mjs` now builds the carrier from the tree's **live** local styles and can re-emit it;
+  `deploy.mjs` re-emits after the expansion. Style ids the expansion brings in join the salted
+  namespace. The carrier's own margin-collapse rule again names its live widget id (a stale one cost
+  every affected page 20px of top offset).
+- `normalizeIds` rekeys style ids on the id **segment**, so a salt containing the element-id string
+  can no longer capture the rename.
+- New `reinlineTree(bundle, page, pageIndex, opts)` on the `./inline` export.
+- Opt-in `opts.componentRawCss` / `deployBundle(cfg.componentRawCss)` additionally routes an expanded
+  component subtree's own `custom_css` into the carrier. It is **off by default**: that CSS has
+  always been dropped on free Elementor (it rides a local style, where `custom_css` no-ops) in inline
+  and non-inline builds alike, so emitting it is a rendering change, not part of this fix.
+
 ## 2.0.0
 
 **Components, both directions.** A JSX component registered with `defineComponent` compiles to a

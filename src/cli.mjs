@@ -218,14 +218,19 @@ async function build(entry) {
     const bundle = JSON.parse(readFileSync(resolve(arg), 'utf8'));
     console.log(inspectBundle(bundle, opts));
   } else if (cmd === 'lint') {
-    // exjsx lint <entry.jsx|bundle.json> [--strict] — conventions check (see CONVENTIONS.md).
+    // exjsx lint <entry.jsx|bundle.json> [--strict] [--a11y[=warn|error]] — conventions check (see CONVENTIONS.md).
     // errors always fail; --strict also fails on warnings (CI gate).
-    if (!arg || arg.startsWith('--')) { console.error('usage: exjsx lint <entry.jsx|bundle.json> [--strict]'); process.exit(2); }
+    if (!arg || arg.startsWith('--')) { console.error('usage: exjsx lint <entry.jsx|bundle.json> [--strict] [--a11y[=warn|error]]'); process.exit(2); }
     const { lintBundle, formatLint } = await import('./lint.mjs');
     const bundle = arg.endsWith('.json')
       ? JSON.parse(readFileSync(resolve(arg), 'utf8'))
       : JSON.parse(readFileSync(await build(arg), 'utf8'));
-    const r = lintBundle(bundle);
+    // --a11y[=warn|error] turns on the accessibility tier (off by default so it can never break an
+    // existing CI gate); bare --a11y means 'error'. A site can also opt in permanently via
+    // `a11y: { level: 'warn' }` in site.config.mjs, which rides along in the bundle.
+    const a11yArg = process.argv.find((a) => a === '--a11y' || a.startsWith('--a11y='));
+    const a11y = a11yArg ? (a11yArg.split('=')[1] || 'error') : undefined;
+    const r = lintBundle(bundle, a11y ? { a11y } : {});
     console.log(formatLint(r));
     const strict = process.argv.includes('--strict');
     if (r.counts.error || (strict && r.counts.warn)) process.exit(1);
@@ -307,5 +312,5 @@ export default ({ theme: t }) => (
     const { readFileSync: rf } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     console.log(rf(join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'API-CARD.md'), 'utf8'));
-  } else console.log('usage: exjsx init [dir] | api | build <entry.jsx|project-dir> [out.json] [--inline] | deploy <bundle.json> [--dry] [--only <slug[,slug]>] [--force] [--allow-unregistered] | lint <entry.jsx|bundle.json> [--strict] | import <url-or-html-file> --out <file>.page.jsx [--name <slug>] | media <manifest.mjs> [map.json] | decompile <tree.json>|--page <id> [out.jsx] [--components] | inspect <bundle.json> [--page <slug>] [--el <id>]');
+  } else console.log('usage: exjsx init [dir] | api | build <entry.jsx|project-dir> [out.json] [--inline] | deploy <bundle.json> [--dry] [--only <slug[,slug]>] [--force] [--allow-unregistered] | lint <entry.jsx|bundle.json> [--strict] [--a11y[=warn|error]] | import <url-or-html-file> --out <file>.page.jsx [--name <slug>] | media <manifest.mjs> [map.json] | decompile <tree.json>|--page <id> [out.jsx] [--components] | inspect <bundle.json> [--page <slug>] [--el <id>]');
 })().catch((e) => { console.error(e.message); process.exit(1); });

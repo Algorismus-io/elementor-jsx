@@ -27,7 +27,7 @@ const EXCLUDES = {
   'kit/kit.mjs': ['freshId', 'resetIds'],
   'kit/kit-components.mjs': ['CInc'],
   'theme.mjs': ['S', 'C', 'SZ', 'BG', 'RAD', 'DIM'],   // re-exports of kit names — barrel takes them from kit
-  'site.mjs': [], 'tw.mjs': [], 'runtime.mjs': [],
+  'site.mjs': [], 'tw.mjs': [], 'runtime.mjs': [], 'a11y.mjs': [],
   // compile/deploy machinery — the authoring surface is defineComponent only
   'component.mjs': ['beginComponents', 'componentsActive', 'finalizeComponents', 'endComponents',
     'emitComponentInstance', 'rewriteComponentIds', 'hasComponentInstances', 'referencedComponentUids', 'expandInstances'],

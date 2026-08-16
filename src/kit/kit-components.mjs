@@ -526,3 +526,112 @@ export const chatMock = (msgs = [['Any slots Friday?', 0], ['Yes, 2pm or 4:30pm 
   `<div style="font-family:Inter,sans-serif;display:flex;flex-direction:column;gap:8px">${msgs.map(([t, me]) => `<div style="align-self:${me ? 'flex-start' : 'flex-end'};max-width:80%;background:${me ? '#fff' : 'rgba(255,255,255,.9)'};color:#0A2230;font-size:12px;padding:8px 11px;border-radius:12px">${t}</div>`).join('')}<div style="align-self:flex-start;color:#fff;font-size:16px;letter-spacing:2px">&bull;&bull;&bull;</div></div>`);
 
 export const CInc = { S, C, N, B, SZ, DIM, M, RAD, BG, GRAD, SHADOW, HTML, LINK }; // re-export bag
+
+/* ─────────────────────────────── accessibility primitives ───────────────────────────────
+ * These exist because the two mechanisms Elementor gives us for accessibility metadata have very
+ * different reach (live-verified on 4.2.1 free — see src/a11y.mjs LANDMARKS for the full note):
+ *   settings.tag        renders everywhere, but its enum has no <main> and no <nav>;
+ *   settings.attributes (role/aria-*) is DROPPED by free core's null transformer, Pro-only.
+ * So anything that MUST work on a free install cannot go through role/aria at all — it has to be
+ * real markup. The classic html widget emits its content verbatim on every tier, which makes it
+ * the one reliable carrier for a skip link and for screen-reader-only text. */
+
+/** Screen-reader-only text: visible to assistive tech, clipped to 1px for everyone else.
+ * The declaration block is the long-standing "visually hidden" recipe (clip-path + 1px box);
+ * `focusable` makes it reveal itself on focus, which is what a skip link needs. */
+export const SR_ONLY_CSS = 'position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0;';
+
+/** Visually-hidden text as a standalone element (e.g. naming an icon-only control in real markup). */
+export const srOnly = (text, { tag = 'span' } = {}) => ({
+  id: freshId(), elType: 'widget', widgetType: 'html',
+  settings: { html: `<${tag} style="${SR_ONLY_CSS}">${text}</${tag}>` },
+  styles: {}, elements: [],
+});
+
+/**
+ * Skip link (WCAG 2.2 SC 2.4.1 Bypass Blocks, Level A — a real success criterion, unlike the
+ * landmark best-practices). Emitted as raw markup rather than an atomic button for two reasons:
+ * an atomic e-button cannot carry the :focus reveal without Pro-only custom_css, and the link must
+ * be the FIRST focusable thing in the document, which raw markup guarantees.
+ *
+ * `target` is the id of the element to jump to — give that element id="main-content" (the `id`
+ * prop on any container sets Elementor's _cssid, which DOES render on free). tabindex="-1" on the
+ * target is added by the emitted script so the jump actually moves focus in browsers that
+ * otherwise only move the scroll position.
+ */
+export const skipLink = (target = 'main-content', text = 'Skip to content') => ({
+  id: freshId(), elType: 'widget', widgetType: 'html',
+  settings: {
+    html:
+      `<a class="exjsx-skip" href="#${target}">${text}</a>`
+      + `<style>.exjsx-skip{${SR_ONLY_CSS}}`
+      + `.exjsx-skip:focus,.exjsx-skip:focus-visible{position:fixed!important;top:8px;left:8px;width:auto;height:auto;margin:0;padding:12px 18px;clip:auto;clip-path:none;overflow:visible;white-space:normal;z-index:100000;background:#000;color:#fff;border-radius:8px;font:600 15px/1.2 system-ui,sans-serif;text-decoration:none;outline:3px solid #fff;outline-offset:2px}</style>`
+      // The target is rendered AFTER this widget, so a bare inline script finds nothing — the
+      // tabindex has to be set once the document is parsed (verified with a live DOM probe: the
+      // immediate version left tabindex unset on every page).
+      + `<script>(function(){var s=${JSON.stringify(target)},f=function(){var t=document.getElementById(s);if(t&&!t.hasAttribute("tabindex"))t.setAttribute("tabindex","-1")};"loading"===document.readyState?document.addEventListener("DOMContentLoaded",f):f()})()</script>`,
+  },
+  styles: {}, elements: [],
+});
+
+/**
+ * A site-wide focus-visible indicator (WCAG 2.2 SC 2.4.7 Focus Visible, AA + 1.4.11 Non-text
+ * Contrast, AA). Elementor's atomic base styles do not ship one, and the browser default outline
+ * disappears against most brand backgrounds. Two-tone (dark ring + light halo) so it stays visible
+ * on both light and dark surfaces without knowing the palette.
+ */
+export const focusRing = ({ color = '#1a1a1a', halo = '#ffffff', width = 3 } = {}) => ({
+  id: freshId(), elType: 'widget', widgetType: 'html',
+  settings: {
+    html: `<style>:where(a,button,input,select,textarea,summary,[tabindex]):focus-visible{outline:${width}px solid ${color}!important;outline-offset:2px!important;box-shadow:0 0 0 ${width + 2}px ${halo}!important;border-radius:3px}</style>`,
+  },
+  styles: {}, elements: [],
+});
+
+/**
+ * Make an overflow-scrolling container reachable and operable from the keyboard
+ * (WCAG 2.2 SC 2.1.1 Keyboard, Level A — axe reports this as `scrollable-region-focusable`).
+ *
+ * A horizontally-scrolling filmstrip whose cards are plain text has no focusable descendant, so a
+ * keyboard-only reader can never scroll it and simply cannot reach the content past the fold. The
+ * fix is one `tabindex="0"` on the scroller: once focused, the browser's own arrow-key scrolling
+ * takes over — no scripted key handling, no focus trap.
+ *
+ * Why a script and not an attribute: `settings.attributes` is dropped wholesale by free Elementor's
+ * null transformer (see the note at the top of this section), so `tabindex` cannot ride on the
+ * element itself on a free install. The classic html widget's markup DOES render on every tier,
+ * which is the same carrier `skipLink` uses.
+ *
+ * It applies axe's own criterion rather than trusting a hand-written selector: an element counts
+ * only when it BOTH overflows AND has `overflow` auto/scroll on the overflowing axis. That
+ * distinction is the whole correctness of the thing — `scrollWidth > clientWidth` is also true of
+ * every `overflow:hidden` box on the page, and those cannot be scrolled by anyone, so a tab stop
+ * there goes nowhere. It is re-evaluated on resize, because overflow is viewport-dependent.
+ *
+ * The default selector is `*` deliberately: the geometry test is the precise one, and the class
+ * names a tw/raw rule compiles to are generated, so a hand-written selector is the fragile part.
+ * Pass one only to narrow the search.
+ *
+ * `label` is optional; when given the scroller is also announced as a named region, which is what
+ * lets a screen-reader user know what they have landed on. Without a label no role is set — an
+ * unnamed region is not a landmark, and announcing an anonymous group is worse than silence.
+ *
+ * It never touches an element that is already focusable or already labelled, so authored markup
+ * always wins.
+ */
+export const keyboardScrollable = (selector = '*', label = null) => ({
+  id: freshId(), elType: 'widget', widgetType: 'html',
+  settings: {
+    html: `<script>(function(){var q=${JSON.stringify(String(selector))},L=${JSON.stringify(label)};`
+      + `function scrollable(e){var c=getComputedStyle(e),o=/^(auto|scroll)$/;`
+      + `return (e.scrollWidth>e.clientWidth+1&&o.test(c.overflowX))||(e.scrollHeight>e.clientHeight+1&&o.test(c.overflowY))}`
+      + `function u(){document.querySelectorAll(q).forEach(function(e){`
+      + `if(e.matches("a,button,input,select,textarea,summary,[contenteditable]"))return;`
+      + `if(scrollable(e)){if(!e.hasAttribute("tabindex"))e.setAttribute("tabindex","0");`
+      + `if(L&&!e.hasAttribute("aria-label")){e.setAttribute("role","region");e.setAttribute("aria-label",L)}}`
+      + `else if(e.getAttribute("tabindex")==="0")e.removeAttribute("tabindex")})}`
+      + `"loading"===document.readyState?document.addEventListener("DOMContentLoaded",u):u();`
+      + `addEventListener("resize",u)})()</script>`,
+  },
+  styles: {}, elements: [],
+});
