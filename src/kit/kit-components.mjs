@@ -19,14 +19,52 @@ import {
 /** Atomic container background IMAGE. Accepts a URL (string), an attachment id (number), or a
  * prebuilt image envelope, plus optional {color, size, position, repeat, attachment}. Emits the
  * $$type:'background' envelope with a background-image-overlay (validated against the live plugin). */
+/* Elementor validates overlay `size` and `position` as UNIONS. The string member is a keyword enum
+ * only — size ∈ {auto,cover,contain}, position ∈ the nine 'top left'-style keywords. Anything else
+ * (a `50% 50%` pair, a `100% 1px` scale) must use the OTHER member: background-image-position-offset
+ * / background-image-size-scale, whose x/y and width/height take `size` envelopes. Passing a
+ * percentage pair as a string returns `background: invalid_value` from the class-registry PUT —
+ * previously invisible because `--inline` skips that PUT entirely. */
+const POS_KEYWORDS = new Set(['center center', 'center left', 'center right', 'top center',
+  'top left', 'top right', 'bottom center', 'bottom left', 'bottom right']);
+const PCT_X = { '0%': 'left', '50%': 'center', '100%': 'right' };
+const PCT_Y = { '0%': 'top', '50%': 'center', '100%': 'bottom' };
+const LEN = (v) => {
+  const m = /^(-?[\d.]+)(px|%|em|rem|vw|vh)$/.exec(String(v).trim());
+  return m ? { $$type: 'size', value: { unit: m[2], size: parseFloat(m[1]) } } : null;
+};
+export function normalizeBgPosition(position) {
+  const v = String(position ?? '').trim();
+  if (!v) return null;
+  if (POS_KEYWORDS.has(v)) return S(v);
+  const parts = v.split(/\s+/);
+  if (parts.length === 2) {
+    // CSS is "x y"; Elementor's keyword enum is "<vertical> <horizontal>" — so the pair swaps
+    const kx = PCT_X[parts[0]]; const ky = PCT_Y[parts[1]];
+    if (kx && ky) return S(`${ky} ${kx}`);
+    const x = LEN(parts[0]); const y = LEN(parts[1]);
+    if (x && y) return { $$type: 'background-image-position-offset', value: { x, y } };
+  }
+  return S('center center');                       // unrepresentable → the safe default
+}
+export function normalizeBgSize(size) {
+  const v = String(size ?? '').trim();
+  if (!v || v === 'auto' || v === 'cover' || v === 'contain') return S(v || 'cover');
+  const parts = v.split(/\s+/);
+  if (parts.length === 2) {
+    const w = LEN(parts[0]); const h = LEN(parts[1]);
+    if (w && h) return { $$type: 'background-image-size-scale', value: { width: w, height: h } };
+  }
+  return S('cover');
+}
 export function bgImage(src, { color, size = 'cover', position = 'center center', repeat = 'no-repeat', attachment } = {}) {
   const img = typeof src === 'string' ? IMG_URL(src) : typeof src === 'number' ? IMG_ID(src) : src;
   const overlay = {
     $$type: 'background-image-overlay',
     value: {
       image: img,
-      size: S(size),
-      position: S(position),
+      size: normalizeBgSize(size),
+      position: normalizeBgPosition(position),
       repeat: S(repeat),
       ...(attachment ? { attachment: S(attachment) } : {}),
     },

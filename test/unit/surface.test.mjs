@@ -25,7 +25,8 @@ const SRC = join(__dir, '..', '..', 'src');
 /* documented machinery exclusions — the ONLY names allowed to be missing from the barrel */
 const EXCLUDES = {
   'kit/kit.mjs': ['freshId', 'resetIds'],
-  'kit/kit-components.mjs': ['CInc'],
+  // normalizeBgPosition/Size are internal envelope normalizers for bgImage(), not authoring API
+  'kit/kit-components.mjs': ['CInc', 'normalizeBgPosition', 'normalizeBgSize'],
   'theme.mjs': ['S', 'C', 'SZ', 'BG', 'RAD', 'DIM'],   // re-exports of kit names — barrel takes them from kit
   'site.mjs': [], 'tw.mjs': [], 'runtime.mjs': [], 'a11y.mjs': [],
   // compile/deploy machinery — the authoring surface is defineComponent only

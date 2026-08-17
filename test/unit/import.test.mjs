@@ -15,7 +15,7 @@ import esbuild from 'esbuild';
 import {
   cssColor, compactBox, classify, textRun, mapStyles, diffMobile,
   buildTree, collapseTree, emitNode, emitPageJsx, pageFromCaptures,
-  captureSource, importPage,
+  captureSource, importPage, collectFonts,
 } from '../../src/import.mjs';
 import { buildOptions } from '../../src/bundler.mjs';
 import { compileSite } from '../../src/compile.mjs';
@@ -308,4 +308,40 @@ test('browser-side entry points exist (exercised live by the CLI, not in unit sc
   assert.equal(typeof diffMobile, 'function');
   assert.equal(typeof buildTree, 'function');
   assert.equal(typeof collapseTree, 'function');
+});
+
+
+/* ── collectFonts: the imported page must carry its own webfonts ──
+ * The capture reads computed styles but never the document's <link> tags, so before this an
+ * imported page silently fell back to a system stack inside WordPress and every metric shifted. */
+
+test('collectFonts: returns each real family with the weights actually used, 400 always present', () => {
+  const tree = {
+    sx: { font: 'Playfair Display, serif', weight: 700 },
+    children: [
+      { sx: { weight: 600 }, children: [] },                                  // inherits Playfair
+      { sx: { font: '"Plus Jakarta Sans", sans-serif', weight: 500 }, children: [] },
+    ],
+  };
+  const got = collectFonts(tree);
+  const byFam = Object.fromEntries(got.map((f) => [f.family, f.weights]));
+  assert.deepEqual(Object.keys(byFam).sort(), ['Playfair Display', 'Plus Jakarta Sans']);
+  // 700 declared on the node, 600 inherited from a descendant, 400 always
+  assert.deepEqual(byFam['Playfair Display'], [400, 600, 700]);
+  assert.deepEqual(byFam['Plus Jakarta Sans'], [400, 500]);
+});
+
+test('collectFonts: generic stacks are not webfonts and must not be requested', () => {
+  for (const fam of ['sans-serif', 'ui-monospace', 'system-ui', 'inherit']) {
+    assert.deepEqual(collectFonts({ sx: { font: fam }, children: [] }), [], fam);
+  }
+  assert.deepEqual(collectFonts({ sx: {}, children: [] }), []);
+});
+
+test('emitPageJsx: injects a fontLoader per family as the root\'s first children', () => {
+  const root = { kind: 'container', tag: 'box', sx: { font: 'Playfair Display', weight: 700 }, raw: [], children: [] };
+  const out = emitPageJsx(root, { title: 'T', source: 'x.html' });
+  assert.match(out, /\{fontLoader\("Playfair Display", \[400, 700\]\)\}/);
+  // must land INSIDE the root element, not before it
+  assert.ok(out.indexOf('fontLoader') > out.indexOf('export default () => ('), 'loader is inside the tree');
 });

@@ -1,5 +1,55 @@
 # Changelog
 
+## 2.1.0
+
+**`exjsx import` now reproduces a design without hand-repair.** Measured on two real Google Stitch
+exports deployed to Elementor 4.2.2 + Pro: **99.5%** and **99.1%** pixel fidelity with exact page
+heights and zero manual edits. Before this release the same two pages needed roughly six hand fixes
+each, and one of them failed `assertTree` outright and could not be built at all.
+
+*Authored heights are recovered.* Computed styles cannot distinguish an authored height from a
+content-driven one, so `import` never emitted heights. That silently destroyed Tailwind's
+`absolute inset-0` (height 0 — invisible background images) and `size-N` squares (collapsed to their
+content, shifting every following section). The capture now probes `height:auto` and re-measures,
+skipping only boxes whose height could legitimately come from flex-row/grid stretch.
+
+*`inset-0` is detected by probe, not by reading.* A positioned element reports a RESOLVED
+`bottom`/`right` even when the author never set one — a `fixed top-0` header reports
+`bottom: 819px`. Trusting that pinned both edges and stretched a nav to 181px instead of 81px.
+
+*Paint-only children fold into the parent background.* Stitch draws tints, gradients and hairline
+rules as childless divs, and `assertTree` rejects an empty absolute one (it swallows editor clicks).
+They now fold in correct layer order — an absolute overlay paints ABOVE its in-flow siblings while a
+parent background paints below them, so folding only the absolute one inverted the stacking. Element
+opacity over a known ground colour is reproduced as an equivalent veil layer. `filter`,
+`backdrop-filter`, `transform`, `opacity` and `mix-blend-mode` are NOT hoisted — they apply to the
+whole element, and carrying a decorative `blur(64px)` onto the parent erased a photograph inside it.
+
+*Theme-cascade defence.* Text leaves now pin `letter-spacing` even when the source says `normal`,
+and set `text-wrap: wrap`. A WordPress theme shipping `body{letter-spacing:-0.1px}` or
+`text-wrap: pretty` otherwise leaks in and re-wraps paragraphs at different words.
+
+*Webfonts travel with the page.* The capture reads computed styles but never the document's `<link>`
+tags, so imported pages fell back to a system stack. `collectFonts` gathers each real family with
+the weights actually used and injects loaders; Material Symbols gets its variable-axis URL, which
+`fontLoader`'s `:wght@` form cannot express. An inline icon `<span>` used to flatten to text and
+render the ligature NAME as body copy — its font is now promoted onto the leaf.
+
+*Inline-level boxes hug.* A pill that was `inline-flex` in the source no longer stretches to the
+full width of its flex parent.
+
+**New: `exjsx import --atomic-forms`** maps `<form>` and bare `<input>/<textarea>/<select>` onto the
+native atomic `e-form` family instead of a raw HTML carrier, reconstructing each control's skin from
+its computed styles. Opt-in, because those widgets ride the Pro-only `e_pro_atomic_form` experiment —
+without the flag behaviour is unchanged and free-core imports keep working.
+
+**Fix: `bgImage` emitted an invalid `background` envelope for any non-keyword position or size.**
+Elementor validates overlay `size` and `position` as unions whose string member is a keyword enum
+only — `position` accepts nine `'top left'`-style values, so a `50% 50%` pair was rejected with
+`background: invalid_value`. Percentages that map exactly now become keywords (CSS `x y` order
+swapped to Elementor's vertical-first), and anything else uses `background-image-position-offset` /
+`background-image-size-scale`. This was invisible for a long time because `--inline` skips the
+class-registry write entirely.
 ## 2.0.1
 
 **Fix: `--inline` pages that also use `defineComponent` had their raw CSS applied to the wrong

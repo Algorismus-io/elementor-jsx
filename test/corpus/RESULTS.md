@@ -1,6 +1,6 @@
 # tw corpus — pixel parity scoreboard
 
-Generated 2026-08-09T22:14:15.798Z · viewport 1280 · bench http://127.0.0.1:8931 · scores are mean |Δ| luminance (0–255)
+Generated 2026-08-17T11:53:21.725Z · viewport 1280 · bench http://127.0.0.1:8931 · scores are mean |Δ| luminance (0–255)
 over the common region of the reference (real Tailwind, Play CDN) and the exjsx render (real pipeline,
 `--inline`, free Elementor 4.2.1). Bands: ≤3 near-identical · 3–8 faithful · 8–20 visible · >20 structural.
 

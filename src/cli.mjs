@@ -290,9 +290,9 @@ export default ({ theme: t }) => (
   } else if (cmd === 'import') {
     // exjsx import <url-or-html-file> --out <file>.page.jsx [--name <slug>] — computed-style
     // capture bridge: render in headless Chrome, read computed styles, emit an editable page file.
-    const usage = () => { console.error('usage: exjsx import <url-or-html-file> --out <file>.page.jsx [--name <slug>]'); process.exit(2); };
+    const usage = () => { console.error('usage: exjsx import <url-or-html-file> --out <file>.page.jsx [--name <slug>] [--atomic-forms]'); process.exit(2); };
     if (!arg || arg.startsWith('--')) usage();
-    const opts = {};
+    const opts = { atomicForms: process.argv.includes('--atomic-forms') };
     for (const flag of ['--out', '--name']) {
       const i = process.argv.indexOf(flag);
       if (i === -1) continue;
