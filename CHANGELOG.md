@@ -1,5 +1,61 @@
 # Changelog
 
+## 2.1.1
+
+**Everything `exjsx import` emits for a real-world page got measurably closer to the source.** Ten
+Google Stitch designs were imported, deployed to Elementor 4.2.1 + Pro and pixel-scored against
+their own renders; the fixes below came out of that run and a component-level audit of every form
+control, button and nav on all ten. Output for the same input changes materially — that is the point.
+
+*Authored WIDTHS are recovered, and content-derived ones are left alone.* The capture now probes
+`width:auto` the way it already probed height. Freezing a measured width onto a box whose width
+came from its content is actively harmful: an `inline-flex` pill pinned to 187.1px left its label
+one pixel short, wrapped it to two lines and doubled the control's height. Conversely a `w-12 h-12`
+round icon button classifies as TEXT (its only child is a glyph) and was excluded from width
+entirely, so it stretched 284px across a row instead of 48px.
+
+*Stretch no longer masks an authored height.* Two 48px icon buttons in a flex row hid each other's
+`h-12` — `height:auto` still stretched to the same 48px, so the probe saw no change and the buttons
+rendered 26px tall. The probe now neutralises `align-self` while measuring. Replaced elements
+(`img`/`video`/`canvas`) neutralise BOTH axes, because an intrinsic aspect ratio lets one axis pin
+the other. A round box that renders square keeps both axes — layout probing cannot prove a
+`w-48 h-48` avatar whose child is `w-full h-full`, and losing its width turned a circular portrait
+into a wide ellipse.
+
+*Form controls carry their width.* `fieldCss` restated every visual property except width, so every
+control hugged its content: full-width inputs rendered at 203px and a full-width submit at 112px.
+Widths are now emitted, as `100%` when the control fills its form.
+
+*Inline-level boxes hug regardless of parent.* A `<button class="inline-block px-8 py-4">` carrying
+a label is a TEXT leaf, so the container-only rule never saw it and a 211px CTA rendered 500px wide.
+
+*`formSelect` gets an options ARRAY.* Its second argument is the option list, not the opts object —
+passing the latter threw `options.map is not a function` and killed the build outright on any page
+with a `<select>`. Options are now parsed from the real `<option>` markup.
+
+*Paint-only children fold in the correct order, and effects never travel.* An absolute overlay
+paints ABOVE its in-flow siblings while a parent background paints BELOW them, so folding only the
+absolute one inverted a hero (gradient under the photo). All paint-only children now fold together
+in reverse document order, element opacity over a known ground becomes an equivalent veil layer, and
+`filter`/`backdrop-filter`/`transform`/`opacity`/`mix-blend-mode` are NOT hoisted — carrying a
+decorative `blur(64px)` onto the parent erased a photograph. Border-only decoration (Tailwind corner
+brackets: an empty absolute box with two borders and no background) becomes one gradient layer per
+drawn side. Anything that still cannot fold — it escapes the parent box, so a background layer would
+clip it — is dropped with a note stating the actual reason, rather than failing the build.
+
+*A sole inline child's styling is promoted onto its wrapper.* `<div class="absolute"><span
+class="bg-primary text-on-primary px-3 uppercase">…</span></div>` — the chip-in-a-positioned-wrapper
+pattern — collapsed to a text block and lost its background, inverted colour, padding and tracking.
+The wrapper now adopts the child's visual props and keeps only its own position.
+
+*A coloured word in a heading survives.* `ENTER THE <span class="text-violet">VOID</span>` flattened
+to the heading's own colour. `html-v3` whitelists `em`/`strong`, so a single distinctly-tinted span
+now travels as `<strong>` plus a colour rule that neutralises the bolding.
+
+*Authored sizes are also read from matched CSS declarations* where the stylesheet is reachable —
+deterministic where layout probing is defeated by circular dependencies. (Tailwind's CDN JIT rules
+are not exposed through CSSOM, so the probes remain the fallback there.)
+
 ## 2.1.0
 
 **`exjsx import` now reproduces a design without hand-repair.** Measured on two real Google Stitch

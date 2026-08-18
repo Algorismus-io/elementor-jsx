@@ -109,8 +109,14 @@ test('width heuristic: full-width skipped, maxw-constrained skipped, genuinely c
   assert.equal(capped.maxw, 1280);
   assert.equal(capped.w, undefined, 'maxw is the constraint — no width');
   assert.deepEqual(capped.m, [0, 'auto'], 'equal side gaps → mx auto');
-  const fixed = mapStyles({ tag: 'div', kind: 'container', s: st(), c: CONTROLS.div, parent, rect: R(0, 0, 640, 100) }).sx;
+  // width is emitted only when the capture PROVED it authored (width:auto changed the box). Without
+  // that proof the width came from content or the parent, and freezing it wraps labels onto a 2nd line.
+  const fixed = mapStyles({ tag: 'div', kind: 'container', s: st(), c: CONTROLS.div,
+    parent, rect: R(0, 0, 640, 100), authoredW: 640 }).sx;
   assert.equal(fixed.w, 640);
+  const contentDerived = mapStyles({ tag: 'div', kind: 'container', s: st(), c: CONTROLS.div,
+    parent, rect: R(0, 0, 640, 100) }).sx;
+  assert.equal(contentDerived.w, undefined, 'no authoredW → stays fluid so it can hug or fill');
 });
 
 test('flex-grow children skip width; flex:1 1 0 maps to the flex shorthand, exotic grows go raw', () => {
@@ -227,7 +233,8 @@ const capFixture = () => {
         children: [
           { tag: 'h2', path: '0/0/0/0', styles: st({ 'font-size': '36px', 'font-weight': '700', 'line-height': '40px', color: 'rgb(17, 24, 39)' }), rect: R(24, 96, 1392, 40), children: [{ tag: '#text', text: 'Hello import' }] },
           { tag: 'p', path: '0/0/0/1', styles: st({ 'font-size': '16px', 'line-height': '26px', color: 'rgb(55, 65, 81)' }), rect: R(24, 160, 1392, 52), children: [{ tag: '#text', text: 'Computed styles in, JSX out.' }] },
-          { tag: 'div', path: '0/0/0/2', styles: st({ 'background-color': 'rgb(37, 99, 235)' }), rect: R(24, 240, 640, 60), children: [] },
+          // authoredW mirrors what the real capture's width:auto probe records for an authored width
+          { tag: 'div', path: '0/0/0/2', styles: st({ 'background-color': 'rgb(37, 99, 235)' }), rect: R(24, 240, 640, 60), authoredW: 640, children: [] },
         ],
       }],
     }],
