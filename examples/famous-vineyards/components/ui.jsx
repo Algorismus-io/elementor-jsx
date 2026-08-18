@@ -1,9 +1,17 @@
 /** Famous Vineyards components — framework via the auto-using prelude, zero imports. */
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-// absolute base — esbuild inlines this file into a tmp entry, so import.meta.url would lie
-const DATA = process.env.EXJSX_DATA || '/Users/shahmir/projects/wpos-muneeb-backend/elementor-jsx/examples/famous-vineyards/data';
+// esbuild inlines this file into a tmp entry, so import.meta.url would lie about where we are.
+// The fallback therefore resolves from CWD rather than import.meta — and must never be an absolute
+// path from one machine: it was, so this example failed to build for anyone who cloned the repo.
+const DATA = process.env.EXJSX_DATA || (() => {
+  const here = process.cwd();
+  for (const c of [join(here, 'examples/famous-vineyards/data'), join(here, 'data'), join(here, '../data')]) {
+    if (existsSync(join(c, 'media.json'))) return c;
+  }
+  throw new Error('famous-vineyards: cannot locate data/ — run the build from the repo root, or set EXJSX_DATA');
+})();
 export const A = JSON.parse(readFileSync(join(DATA, 'media.json'), 'utf8'));
 const svgRaw = (name) => readFileSync(join(DATA, `${name}.svg`), 'utf8').replace('width="100%" height="100%"', '');
 export const Svg = ({ name, w, h }) => <html raw={`<div style="width:${w}px;height:${h}px;display:flex;">${svgRaw(name).replace('<svg ', `<svg width="${w}" height="${h}" `)}</div>`} />;
