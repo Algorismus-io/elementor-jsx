@@ -91,6 +91,24 @@ npx exjsx inspect site.bundle.json   # readable bundle dump (custom_css decoded)
 npx exjsx media manifest.mjs        # hash-cached asset sideloading
 ```
 
+## Import an existing page
+
+```bash
+npx exjsx import https://example.com/pricing --out site/pages/pricing.page.jsx
+npx exjsx import ./saved.html --out site/pages/x.page.jsx --atomic-forms   # Pro: native e-form
+```
+
+Renders the page in headless Chrome and reads computed styles, so whatever produced the CSS —
+Tailwind, BEM, CSS-in-JS — resolves before we look. You get a normal `.page.jsx` to lint, build,
+deploy and then edit as code.
+
+`--atomic-forms` turns `<form>`/`<input>` into native `e-form` widgets. It is opt-in because those
+are Pro-only; without it a free-Elementor import still works, with the form as an HTML carrier.
+
+Import is for *migrating* a page quickly. For a page whose structure or behaviour matters, author
+the JSX — measured on the same design, hand-authored scored 99.98% against the source render versus
+85.55% for import.
+
 ## What's inside
 
 - `src/kit/` — **the canonical authoring kit** (typed envelopes, every atomic element,
