@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { canonicalHash, decideDrift, shortHash } from './drift.mjs';
 import { rewriteComponentIds, expandInstances, referencedComponentUids } from './component.mjs';
 import { normalizeIds } from './compile.mjs';
+import { reinlineTree } from './inline.mjs';
 // Pro-only atomic types, shared with lint.mjs's OFFLINE pro-only-element warning: lint cannot know
 // the deploy target, this module can — so the hard gate lives here and the lint rule only flags risk.
 import { PRO_ONLY_TYPES } from './lint.mjs';
@@ -593,6 +594,14 @@ export async function deployBundle(bundle, cfg = {}) {
       } else {
         const byUid = Object.fromEntries(bundle.components.map((c) => [c.uid, c]));
         for (const t of targets) t.elements = normalizeIds(expandInstances(t.elements, byUid));
+        // An --inline page carries a <style> carrier whose selectors embed STYLE IDS, and style ids
+        // embed ELEMENT IDS — which the renumbering above has just changed (expansion splices whole
+        // subtrees in, so ids shift). Left alone, every raw rule keeps selecting the id it was built
+        // for and therefore lands on a DIFFERENT element. Re-emit the carrier from the live ids, and
+        // salt the styles the expansion brought in. No-op for non-inline bundles (no carrier).
+        // `componentRawCss` stays OFF by default: recovering the expanded subtrees' own custom_css
+        // is a rendering change, not part of this fix (see inline.mjs).
+        if (bundle.inline) targets.forEach((t, i) => { reinlineTree(bundle, t, i, { componentRawCss: cfg.componentRawCss === true }); });
         report.componentsExpanded = bundle.components.length;
       }
     }

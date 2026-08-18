@@ -12,6 +12,7 @@ import { box, sx, styled, splitStates, applyStates, h2 as kh2, h3 as kh3, txt as
 import { heading, para, image, imageUrl, node, nativeGrid, LINK, interact, ATTRS } from './kit/kit.mjs';
 import { mergeTw } from './tw.mjs';
 import { componentsActive, emitComponentInstance } from './component.mjs';
+import { landmarkSettings } from './a11y.mjs';
 
 /* Symbol.for, not Symbol: a relative-import entry gets its OWN bundled runtime copy (the cli's
  * packages:'external' only externalizes bare imports), so <>…</> made by that copy must still
@@ -114,7 +115,23 @@ function intrinsic(type, props, children) {
   // State objects (hover/active/focus/focus-visible/checked — sx vocabulary + raw) split out
   // BEFORE sx sees the props; applied as NATIVE state variants (+ per-state custom_css) below.
   const { rest: p2, states } = splitStates(mergeTw(props));
-  const { tag, dir, raw, href, id, alt, cls, gcls, dyn: dynTag, motion, animate, attrs, ...style } = p2;
+  const { tag: tagProp, dir, raw, href, id, alt, cls, gcls, dyn: dynTag, motion, animate, attrs: attrsProp, landmark, label, ...style } = p2;
+  // landmark="main|banner|navigation|contentinfo|complementary|region|search" → the tag + role/
+  // aria-label an atomic container needs to BE that landmark. Resolved here (not in sx) because
+  // it sets `tag` and `attributes`, which are settings, not styles. `label` is the accessible
+  // name; a `region` without one is refused outright (an unnamed <section> is not a landmark).
+  let tag = tagProp;
+  let attrs = attrsProp;
+  if (landmark !== undefined) {
+    const lm = landmarkSettings(landmark, label);
+    if (tagProp && tagProp !== lm.tag) {
+      throw new Error(`exjsx: <${type} landmark="${landmark}" tag="${tagProp}"> — landmark="${landmark}" already implies tag="${lm.tag}"; drop the tag prop (or drop the landmark and set role via attrs yourself)`);
+    }
+    tag = lm.tag;
+    attrs = { ...lm.attrs, ...(attrsProp || {}) };
+  } else if (label !== undefined) {
+    throw new Error(`exjsx: <${type} label="…"> without landmark — a bare aria-label on a non-landmark container is not announced. Pair it with landmark="…", or pass attrs={{'aria-label':'…'}} deliberately.`);
+  }
   // motion={{effect,trigger,…}} (or an array ≤5) → native interactions on the built node via
   // interact()/interaction() — the JSX layer is a thin adapter, kit stays canonical. `animate`
   // is the pre-1.8 spelling, kept as an alias; both at once is ambiguous → loud.
@@ -130,7 +147,13 @@ function intrinsic(type, props, children) {
   };
   switch (type) {
     case 'box': case 'div': case 'col': case 'row': case 'section': {
-      const b = box({ ...style, raw, dir: type === 'row' ? 'row' : dir, tag: type === 'section' ? 'section' : tag }, kids());
+      // <section> defaults its tag to 'section' — but an explicit landmark has ALREADY resolved
+      // the tag it needs (contentinfo → footer), and that must win. Letting the intrinsic's default
+      // override it silently produced <section> where <footer> was asked for, so four pages
+      // rendered with zero landmarks while the source said otherwise (caught by a post-deploy
+      // DOM probe, not by the build).
+      const resolvedTag = tag ?? (type === 'section' ? 'section' : undefined);
+      const b = box({ ...style, raw, dir: type === 'row' ? 'row' : dir, tag: resolvedTag }, kids());
       if (id) b.settings._cssid = { $$type: 'string', value: id };
       if (href) b.settings.link = LINK(href);   // container-level link (cross-page nav chips, clickable cards)
       return withFx(addGcls(markCls(b, cls), gcls));

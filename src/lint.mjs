@@ -11,6 +11,8 @@
  * and hand-crafted bundles — not just our own compiler output.
  */
 
+import { analyzeContrast, readLandmark, LANDMARKS, UNIQUE_LANDMARKS, nodeText, suggestAccessibleColor } from './a11y.mjs';
+
 const F = (rule, severity, where, message, fix) => ({ rule, severity, where, message, fix });
 
 /* ── tree walking ───────────────────────────────────────── */
@@ -211,6 +213,27 @@ function* allInteractions(bundle) {
 }
 
 const RULES = [
+  {
+    // Field report (50-page run): 13 of 50 pages shipped shattered eyebrows because `ls={1.6}`
+    // reads as pixels but compiles to 1.6em — 20.8px of tracking on a 13px label. Bare ls numbers
+    // are em by convention; `lh` already guards this by magnitude (v > 4 → px) but `ls` never did.
+    // Nothing legitimately tracks at half its own font size, so that is the signature to flag.
+    id: 'tracking-em-looks-like-px', severity: 'warn',
+    run(bundle) {
+      const out = [];
+      for (const { owner, props } of allStyleProps(bundle)) {
+        const env = props['letter-spacing'];
+        if (env?.$$type !== 'size') continue;
+        const { unit, size } = env.value || {};
+        if (unit === 'em' && Number(size) >= 0.5) {
+          out.push(F(this.id, this.severity, owner,
+            `letter-spacing ${size}em — ${size}× the font size, which breaks words apart`,
+            `bare ls numbers are em; write ls="${size}px" if you meant pixels, or ls={0.${String(size).replace('.', '')}} for tracking`));
+        }
+      }
+      return out;
+    },
+  },
   {
     id: 'invalid-envelope', severity: 'error',
     run(bundle) {
@@ -583,10 +606,179 @@ const RULES = [
   },
 ];
 
-/** Run every rule. Returns { findings, counts: {error,warn,info} }. */
-export function lintBundle(bundle) {
+/* ── the a11y tier ───────────────────────────────────────────────────────
+ * These rules live in their OWN tier, off unless asked for, because they are the only rules in
+ * this file that can fire on input that was valid yesterday. Turning them on globally would break
+ * every existing `exjsx lint --strict` in CI — so the level is opt-in per site
+ * (`a11y: { level: 'warn' | 'error' }` in site.config.mjs) or per run (`exjsx lint --a11y`).
+ * Three states, borrowed from Storybook's a11y addon: off | warn | error.
+ *
+ * WHAT IS AND ISN'T CONFORMANCE. `contrast` is WCAG 2.2 SC 1.4.3 (Level AA) — a real failure with
+ * legal weight under EN 301 549 / ADA. The `landmark-*` rules are NOT WCAG: axe tags `region` and
+ * `landmark-one-main` as Deque BEST PRACTICE (verified in axe-core doc/rule-descriptions.md), and
+ * no success criterion requires a <main>. They are here because they measurably help screen-reader
+ * users navigate, and they are severity-capped one notch below contrast for exactly that reason. */
+const A11Y_LEVELS = new Set(['off', 'warn', 'error']);
+/* A contrast failure is only actionable if the author knows WHAT to change it to. Compute the
+ * nearest passing colour on the same hue so the fix is a copy-paste, not a guessing game — this is
+ * the compile-time advantage made concrete (at render time the token is long gone). */
+function contrastFix(f) {
+  const s = suggestAccessibleColor(f.fg, f.bg, f.required);
+  const bigger = f.size < 24 ? ` (or make it ${f.size >= 18.66 ? 'bold' : '>=24px, or >=18.66px bold'} so the 3:1 large-text threshold applies)` : '';
+  if (s) return `set the text colour to ${s.color} (${s.ratio}:1, same hue) — or change the background${bigger}`;
+  return `no shade of this hue reaches ${f.required}:1 on ${f.bg} — the BACKGROUND is what has to change here${bigger}`;
+}
+/** one notch softer than the configured level — for advisory/best-practice rules and prompts. */
+const softer = (level) => (level === 'error' ? 'warn' : 'info');
+
+const A11Y_RULES = [
+  {
+    /* WCAG 2.2 SC 1.4.3 Contrast (Minimum), AA. The single highest-volume real failure on the web
+     * (WebAIM Million 2026: 83.9% of home pages) and the one failure class a compiler is uniquely
+     * placed to kill — at build time the author still has the TOKEN in hand; by render time it has
+     * collapsed into pixels and nobody knows which variable to change. */
+    id: 'contrast', wcag: '1.4.3',
+    run(bundle, level) {
+      return analyzeContrast(bundle)
+        .filter((f) => f.status === 'fail')
+        .map((f) => F(this.id, level, f.where,
+          `contrast ${f.ratio}:1 — needs ${f.required}:1 for ${f.size}px${Number(f.weight) >= 700 ? ' bold' : ''} text (${f.fg} on ${f.bg}${f.over === 'gradient' ? ', the worst gradient stop' : ''}) — "${f.text.slice(0, 42)}"`,
+          contrastFix(f)));
+    },
+  },
+  {
+    /* The honesty rule. A pair we could not resolve is NOT a pass — say so, and say why, so the
+     * author knows a human (or axe against the rendered page) still has to look at it. */
+    id: 'contrast-unresolved', wcag: '1.4.3',
+    run(bundle, level) {
+      const out = [];
+      for (const f of analyzeContrast(bundle)) {
+        if (f.status !== 'unresolved') continue;
+        out.push(F(this.id, softer(level), f.where,
+          `contrast NOT CHECKED for "${f.text.slice(0, 42)}" — ${f.reason}`,
+          'this one needs a human or a render-time check (axe against the deployed page); if the backdrop is an image, put the text on a scrim/overlay with a known colour so the pair becomes decidable'));
+      }
+      return out;
+    },
+  },
+  {
+    /* Not WCAG (axe best-practice `landmark-one-main`), but the cheapest real win for screen-reader
+     * navigation. Note the honest caveat in the fix text: <main> is NOT in Elementor's tag enum, so
+     * this resolves to role="main", which free Elementor drops on the floor. */
+    id: 'landmark-main', wcag: null,
+    run(bundle, level) {
+      const out = [];
+      for (const p of bundle.pages || []) {
+        const found = [];
+        for (const { n } of walk(p.elements)) { const lm = readLandmark(n); if (lm) found.push(lm.landmark); }
+        if (!found.includes('main')) {
+          out.push(F(this.id, softer(level), `page /${p.slug}/`,
+            'no main landmark — screen-reader users have no "skip to the content" target',
+            'wrap the page body in <box landmark="main">. NOTE: <main> is not in Elementor\'s tag enum, so this emits role="main", which needs Elementor Pro >= 4.1 to reach the DOM (free core\'s Attributes_Transformer returns null). On a free target the honest ceiling is banner/contentinfo/complementary via native tags.'));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    /* axe `landmark-unique` / `landmark-banner-is-top-level` territory: two banners is worse than
+     * none, because it makes the landmark list useless. */
+    id: 'landmark-duplicate', wcag: null,
+    run(bundle, level) {
+      const out = [];
+      for (const p of bundle.pages || []) {
+        const seen = new Map();
+        for (const { n } of walk(p.elements)) {
+          const lm = readLandmark(n);
+          if (!lm || !UNIQUE_LANDMARKS.has(lm.landmark)) continue;
+          seen.set(lm.landmark, (seen.get(lm.landmark) || 0) + 1);
+        }
+        for (const [lm, count] of seen) {
+          if (count > 1) {
+            out.push(F(this.id, softer(level), `page /${p.slug}/`,
+              `${count} "${lm}" landmarks on one page — a duplicated landmark is not navigable`,
+              `keep exactly one ${lm} per page; extra sections want landmark="region" label="…" (or no landmark at all)`));
+          }
+        }
+      }
+      return out;
+    },
+  },
+  {
+    /* Free-tier honesty, same shape as the existing `pro-interaction` rule: these landmarks SAVE
+     * everywhere but only reach the DOM with Pro. Silence here would be the exact "looks fixed,
+     * isn't" failure mode this linter exists to prevent. */
+    id: 'landmark-needs-pro', wcag: null,
+    run(bundle, level) {
+      const hits = new Map();
+      for (const page of pagesAndParts(bundle)) {
+        for (const { n } of walk(page.elements)) {
+          const lm = readLandmark(n);
+          if (!lm || LANDMARKS[lm.landmark]?.tier !== 'pro') continue;
+          if (!hits.has(lm.landmark)) hits.set(lm.landmark, `${page.slug ?? page.type}#${n.id}`);
+        }
+      }
+      return [...hits].map(([lm, where]) => F(this.id, 'info', where,
+        `landmark="${lm}" is carried by role/aria-label, which FREE Elementor does not emit (Attributes_Transformer::transform() returns null in 4.2.1) — it renders as a plain <div> there`,
+        `verified working on Elementor Pro >= 4.1 (licence feature atomic-custom-attributes). ${LANDMARKS[lm]?.note}. On free targets, banner/contentinfo/complementary are the landmarks that actually render.`));
+    },
+  },
+  {
+    /* WCAG 2.2 SC 2.4.4 Link Purpose (A) + 4.1.2 Name, Role, Value (A). A link with no text has no
+     * accessible name at all — one of the six failure types in 96% of WebAIM Million errors. */
+    id: 'link-name', wcag: '2.4.4',
+    run(bundle, level) {
+      const out = [];
+      for (const page of pagesAndParts(bundle)) {
+        for (const { n } of walk(page.elements)) {
+          const linked = n.settings?.link?.value?.destination !== undefined;
+          if (!linked && n.widgetType !== 'e-button') continue;
+          if (nodeText(n)) continue;
+          if ((n.elements || []).length) continue;              // a wrapper link named by its children
+          out.push(F(this.id, level, `${page.slug ?? page.type}#${n.id}`,
+            'link/button has no text — it is announced as an unnamed link',
+            'give it visible text, or an accessible name via attrs={{ "aria-label": "…" }} (Pro-only emission — prefer real text)'));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    /* WCAG 2.2 SC 2.4.4. "Read more" x12 is a link list that tells a screen-reader user nothing.
+     * Advisory: whether the purpose is clear from context is genuinely human judgement, so this
+     * PROMPTS rather than fails — the taxonomy's (c) bucket surfaced, not silently passed. */
+    id: 'generic-link-text', wcag: '2.4.4',
+    run(bundle, level) {
+      const GENERIC = /^(click here|read more|learn more|more|here|this|link|details|see more|find out more)$/i;
+      const out = [];
+      for (const page of pagesAndParts(bundle)) {
+        const hits = [];
+        for (const { n } of walk(page.elements)) {
+          if (n.settings?.link?.value?.destination === undefined && n.widgetType !== 'e-button') continue;
+          const t = nodeText(n);
+          if (t && GENERIC.test(t.trim())) hits.push({ id: n.id, t: t.trim() });
+        }
+        // one finding per page: a single "Learn more" is fine, a page of them is the problem
+        if (hits.length > 1) {
+          out.push(F(this.id, softer(level), `${page.slug ?? page.type}#${hits[0].id} (+${hits.length - 1} more)`,
+            `${hits.length} links share generic text ("${hits[0].t}") — read out of context they are indistinguishable`,
+            'name the destination in the link text ("Read the pricing guide"), or keep the text and check each one still makes sense in its surrounding sentence (SC 2.4.4 allows in-context naming — this is a judgement call, not an automatic failure)'));
+        }
+      }
+      return out;
+    },
+  },
+];
+
+/** Run every rule. Returns { findings, counts: {error,warn,info} }.
+ *  `opts.a11y` — 'off' | 'warn' | 'error' for the accessibility tier (default: the bundle's own
+ *  `a11y.level`, else 'off'; see A11Y_RULES for why this is opt-in). */
+export function lintBundle(bundle, opts = {}) {
   if (!bundle || !Array.isArray(bundle.pages)) throw new Error('lintBundle: not a compiled bundle (expected { pages: [...] }) — build first, or pass a bundle.json');
+  const a11y = opts.a11y ?? bundle.a11y?.level ?? 'off';
+  if (!A11Y_LEVELS.has(a11y)) throw new Error(`lintBundle: a11y level "${a11y}" — use one of ${[...A11Y_LEVELS].join(' | ')}`);
   const findings = RULES.flatMap((r) => r.run(bundle));
+  if (a11y !== 'off') findings.push(...A11Y_RULES.flatMap((r) => r.run(bundle, a11y)));
   const counts = { error: 0, warn: 0, info: 0 };
   for (const f of findings) counts[f.severity]++;
   // positive-assertion summary for the clean rules (what silence actually proved)
@@ -616,6 +808,15 @@ export function lintBundle(bundle) {
     if (ix) verified.push(`${ix} interaction item(s) validator-exact (the server strips invalid ones silently — this is the only surface that would have told you)`);
   }
   if (!dirty.has('duplicate-page-slug')) verified.push(`${(bundle.pages || []).length} page slug(s) unique`);
+  // Contrast deserves an explicit positive assertion MORE than any other rule: "no contrast
+  // findings" is ambiguous between "checked and clean" and "never looked", and the second is what
+  // every overlay vendor sells. Say how many pairs were actually resolved, and how many were not.
+  if (a11y !== 'off' && !dirty.has('contrast')) {
+    const all = analyzeContrast(bundle);
+    const ok = all.filter((f) => f.status === 'pass').length;
+    const un = all.filter((f) => f.status === 'unresolved').length;
+    if (ok) verified.push(`${ok} text/background pair(s) meet WCAG 2.2 SC 1.4.3 AA${un ? ` (${un} NOT decidable at compile time — see contrast-unresolved)` : ' (every pair on the page was resolvable)'}`);
+  }
   return { findings, counts, verified };
 }
 

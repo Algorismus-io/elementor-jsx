@@ -1,0 +1,133 @@
+# Tag-triggered release. Publishing by hand from a laptop is how npm and GitHub drift apart — this
+# repo shipped 2.1.0 and 2.1.1 to npm with neither commit on origin. The tag is the only trigger.
+#
+# One-time setup: add an npm automation token as the repo secret NPM_TOKEN
+# (npmjs.com → Access Tokens → Generate → Automation; it bypasses 2FA, which a Publish token won't).
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run every gate but do not publish'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write   # create the GitHub Release
+  id-token: write   # npm provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+
+      # Lockfile install — a release must build from pinned deps, not whatever resolves today.
+      - name: Install
+        run: npm ci
+
+      # GATE 1 — the suite. Includes the coverage audit (a new export with no test fails the run)
+      # and the surface test (a new export must be in the barrel or documented as excluded).
+      - name: Unit tests
+        run: npm test
+
+      # GATE 2 — the tag must equal package.json. Catches the classic "tagged v2.2.0, forgot to bump"
+      # which would otherwise publish the PREVIOUS version under a new tag and desync both surfaces.
+      - name: Tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p 'require("./package.json").version')"
+          echo "tag=$TAG package.json=$PKG"
+          [ "$TAG" = "$PKG" ] || { echo "::error::tag v$TAG != package.json $PKG"; exit 1; }
+
+      # GATE 3 — this version must not already exist. npm rejects it anyway, but failing here gives a
+      # readable error instead of a publish-step stack trace.
+      - name: Version is unpublished
+        run: |
+          PKG="$(node -p 'require("./package.json").version')"
+          NAME="$(node -p 'require("./package.json").name')"
+          if npm view "$NAME@$PKG" version >/dev/null 2>&1; then
+            echo "::error::$NAME@$PKG is already published — bump the version"; exit 1
+          fi
+
+      # GATE 4 — the compiler must survive a real page, not just fixtures. Unit tests were green
+      # while `formSelect` threw `options.map is not a function` on every page containing a <select>.
+      - name: Smoke test — compile a real page
+        run: |
+          mkdir -p /tmp/smoke/pages
+          echo "export default { name: 'smoke' };" > /tmp/smoke/site.config.mjs
+          cat > /tmp/smoke/pages/smoke.page.jsx <<'JSX'
+          export const meta = { title: 'Smoke', template: 'elementor_canvas' };
+          export default () => (
+            <box pad={0} bg="#ffffff">
+              {fontLoader('Inter', [400, 700])}
+              <section pad={[64, 32]}>
+                <h1 size={48} weight={700} lh="56px">Smoke</h1>
+                <text size={16} lh="24px" color="#555555">Compiled in CI.</text>
+                <box dir="row" gap={12} pad={0}>
+                  <text pad={[12, 24]} bg="#1d4ed8" color="#ffffff" radius={6}>Primary</text>
+                  <text pad={[12, 24]} border={[1, '#d3d9e2']} radius={6}>Secondary</text>
+                </box>
+              </section>
+            </box>
+          );
+          JSX
+          node src/cli.mjs lint /tmp/smoke
+          node src/cli.mjs build /tmp/smoke /tmp/smoke/out.json
+          test -s /tmp/smoke/out.json || { echo "::error::build produced no bundle"; exit 1; }
+          node -e "const b=require('/tmp/smoke/out.json');
+            if(!b.pages||!b.pages.length){console.error('no pages in bundle');process.exit(1)}
+            console.log('bundle OK:',b.pages.length,'page(s)')"
+
+      # GATE 5 — what actually ships. `files`/.npmignore mistakes are invisible locally, so inspect
+      # the real tarball rather than the working tree.
+      - name: Inspect the tarball
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e "
+            const p=require('/tmp/pack.json')[0];
+            const names=p.files.map(f=>f.path);
+            const need=['package.json','src/cli.mjs','src/x.mjs','src/import.mjs','src/kit/kit.mjs','types.d.ts'];
+            const missing=need.filter(n=>!names.includes(n));
+            if(missing.length){console.error('::error::missing from tarball: '+missing.join(', '));process.exit(1)}
+            console.log('tarball',p.filename,p.size+'B',names.length+' files');
+          "
+
+      - name: Publish to npm
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run }}
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Pull this version's section out of CHANGELOG.md so the GitHub Release says the same thing the
+      # changelog does, instead of an autogenerated commit list.
+      - name: Extract changelog section
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run }}
+        run: |
+          node -e "
+            const fs=require('fs');
+            const v=require('./package.json').version;
+            const cl=fs.readFileSync('CHANGELOG.md','utf8');
+            const i=cl.indexOf('## '+v);
+            if(i<0){ fs.writeFileSync('/tmp/notes.md','Release '+v); process.exit(0) }
+            const rest=cl.slice(i+3);
+            const j=rest.indexOf('\n## ');
+            fs.writeFileSync('/tmp/notes.md', (j<0?rest:rest.slice(0,j)).trim());
+          "
+
+      - name: GitHub Release
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run }}
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: /tmp/notes.md
+          name: ${{ github.ref_name }}

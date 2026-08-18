@@ -172,6 +172,38 @@ export const PriceCard = defineComponent(
   the component in Elementor, redeploy). Sites without the module 501 with the experiments named
   (`e_components` + `e_atomic_elements`).
 
+## Import (an existing page → editable JSX)
+
+```
+exjsx import <url-or-html-file> --out <file>.page.jsx [--name <slug>] [--atomic-forms]
+```
+
+Renders the source in headless Chrome and reads COMPUTED styles per element, so the browser resolves
+the whole cascade (Tailwind, BEM, CSS-in-JS) and we never parse CSS text. Output is a normal
+`.page.jsx` — lint/build/deploy it like anything you wrote. Needs Playwright: `npm i -D playwright`,
+or point `EXJSX_IT_PLAYWRIGHT` at a `playwright/index.mjs`.
+
+`--atomic-forms` maps `<form>` and bare `<input>/<textarea>/<select>` onto the native `e-form`
+family instead of a raw HTML carrier. **Opt-in because those widgets are Pro-only** (they ride the
+`e_pro_atomic_form` experiment) — without the flag a free-Elementor import still deploys, with the
+form left as an HTML carrier. `exjsx lint` warns via `pro-only-element`.
+
+**Import translates a DOM; authoring builds a page.** Measured on the same design: hand-authored
+JSX scored 99.98% against the source render, `import` 85.55% — and import shipped an inert HTML
+`<table>` where the author built an atomic grid. Use import to *migrate* an existing page fast, then
+iterate the JSX. Author from scratch when structure or behaviour matters.
+
+What it recovers that a naive DOM copy loses: authored widths and heights (probed, so `absolute
+inset-0` overlays and `size-N` squares survive), webfont `<link>`s the capture cannot see, an icon
+font on an inline `<span>` (which would otherwise render its ligature NAME as body copy), and the
+styling of a sole inline child promoted onto its positioning wrapper (the chip-in-a-wrapper pattern).
+Paint-only children fold into the parent's background in the correct layer order, because
+`assertTree` rejects an empty absolutely-positioned container.
+
+Documented limits: pseudo-elements (`::before`/`::after`) are invisible to a DOM walk and are lost;
+inline links inside a paragraph flatten to text (html-v3 whitelists em/strong/br); `raw=` CSS cannot
+vary per breakpoint; and `vh`-derived sizes freeze to the capture viewport (1440x900).
+
 ## Decompile (any live Elementor V4 tree → editable JSX)
 
 ```

@@ -1,8 +1,8 @@
 {
   "name": "@algorismus/elementor-jsx",
-  "version": "2.0.0",
+  "version": "2.1.1",
   "type": "module",
-  "description": "Build Elementor sites with AI agents — typed JSX in, native editable Elementor pages out over REST. Hot reload dev loop, verification gates, 400+ test certified. The exjsx CLI.",
+  "description": "Build Elementor sites with AI agents \u2014 typed JSX in, native editable Elementor pages out over REST. Hot reload dev loop, verification gates, 400+ test certified. The exjsx CLI.",
   "bin": {
     "exjsx": "./src/cli.mjs"
   },

@@ -5,12 +5,13 @@
  */
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { compileSite } from '../../src/compile.mjs';
-import { inlineLocal } from '../../src/inline.mjs';
+import { compileSite, normalizeIds } from '../../src/compile.mjs';
+import { inlineLocal, reinlineTree } from '../../src/inline.mjs';
 import { shouldWriteVariables, deployBundle } from '../../src/deploy.mjs';
 import { defineSite } from '../../src/site.mjs';
 import { defineTheme } from '../../src/theme.mjs';
 import { h } from '../../src/runtime.mjs';
+import { defineComponent, expandInstances } from '../../src/component.mjs';
 import { resetIds, allNodes, classRefs, findNode } from '../helpers.mjs';
 
 beforeEach(() => resetIds());
@@ -135,6 +136,113 @@ test('deployBundle dry: inline bundle reports variablesSkipped=inline and never 
   assert.equal(r.variables, 0);
   assert.match(r.variablesSkipped, /inline/);
   assert.doesNotMatch(r.variablesSkipped, /wp-cli unavailable/);
+});
+
+/* ── the deploy-time RENUMBERING contract ──
+ * The <style> carrier selects by style id and style ids embed element ids. deploy's component
+ * inline-expansion fallback splices subtrees in and re-runs normalizeIds, which shifts every id —
+ * so the carrier has to be re-emitted or its rules land on the WRONG elements. Field symptom: a
+ * hero's `text-[20vw]` applied to the 12px eyebrow one node above it (288px at 1440). */
+
+/** Exactly what deploy.mjs does on the no-Pro / no-ultra-route path, for one page. */
+const expandLikeDeploy = (b, opts = {}) => {
+  const byUid = Object.fromEntries(b.components.map((c) => [c.uid, c]));
+  const p = b.pages[0];
+  p.elements = normalizeIds(expandInstances(p.elements, byUid));
+  reinlineTree(b, p, 0, opts);
+  return p;
+};
+const carrierOf = (p) => allNodes(p.elements).find((n) => n.widgetType === 'html' && /^<style id="exjsx-raw-/.test(n.settings?.html || ''))?.settings.html;
+/** the ONE declaration block the carrier emits for a given style id */
+const ruleFor = (css, sid) => (css.match(new RegExp(`\\.elementor \\.${sid}\\.${sid}\\{([^}]*)`)) || [])[1];
+
+test('inline + component expansion: raw CSS follows the RENUMBERED ids (no style/element mis-assignment)', () => {
+  // minimal fixture: a component instance (forces the deploy-time expand+renumber) followed by two
+  // ADJACENT siblings — a small eyebrow and a heading carrying a distinctive tw size.
+  const Card = defineComponent(() => h('box', { pad: 24 }, h('text', {}, 'card')), { title: 'Card' });
+  const b = buildBundle('site', h('box', {},
+    h(Card, {}),
+    h('text', { size: 12, tw: 'text-[12px]' }, 'Paid acquisition'),
+    h('h1', { tw: 'text-[20vw] uppercase' }, 'HERO'),
+  ));
+  inlineLocal(b);
+  const p = expandLikeDeploy(b);
+
+  const eyebrow = findNode(p.elements, (n) => n.widgetType === 'e-paragraph' && /Paid acquisition/.test(JSON.stringify(n.settings)));
+  const hero = findNode(p.elements, (n) => n.widgetType === 'e-heading');
+  const [eSid] = classRefs(eyebrow), [hSid] = classRefs(hero);
+  assert.notEqual(eSid, hSid);
+
+  const css = carrierOf(p);
+  assert.match(ruleFor(css, hSid) || '', /20vw/, 'the heading\'s own style id carries its 20vw rule');
+  assert.doesNotMatch(ruleFor(css, eSid) || '', /20vw/, 'the eyebrow NEVER receives the heading\'s size');
+  // and no rule may address a style id that is not on the tree at all (a stale rule is a live
+  // land-mine: the next renumbering hands that id to some other element).
+  const live = new Set(allNodes(p.elements).flatMap((n) => Object.keys(n.styles || {})));
+  for (const sid of css.match(/\.elementor \.(e-[0-9a-z-]+?)\./g).map((m) => m.slice(12, -1))) {
+    assert.ok(live.has(sid), `carrier rule targets ${sid}, which no element carries`);
+  }
+});
+
+test('inline + component expansion: the carrier collapses ITS OWN live wrapper id (no 20px page shift)', () => {
+  const Card = defineComponent(() => h('box', { pad: 8 }), { title: 'Carrier Card' });
+  const b = buildBundle('site', h('box', {}, h(Card, {}), h('box', { pad: 0, raw: 'opacity:.5;' })));
+  inlineLocal(b);
+  const p = expandLikeDeploy(b);
+  const carrier = p.elements.find((n) => n.widgetType === 'html');
+  assert.match(carrierOf(p), new RegExp(`\\.elementor-element-${carrier.id}\\{margin:0`), 'margin-collapse rule names the widget\'s CURRENT id');
+});
+
+test('inline + component expansion: expanded subtree styles join the SALTED namespace', () => {
+  const Card = defineComponent(() => h('box', { pad: 24, raw: 'backdrop-filter:blur(4px);' }, h('text', {}, 'c')), { title: 'Salt Card' });
+  const b = buildBundle('site', h('box', {}, h(Card, {}), h('box', { pad: 0, raw: 'opacity:.5;' })));
+  inlineLocal(b);
+  const p = expandLikeDeploy(b);
+  for (const n of allNodes(p.elements)) {
+    for (const sid of Object.keys(n.styles || {})) {
+      assert.match(sid, /^e-[0-9a-z]{1,8}-e[0-9a-z]+-s\d*$/, `expanded style id ${sid} is salted`);
+      assert.equal(n.styles[sid].id, sid, 'the style record agrees with its key');
+    }
+    for (const ref of classRefs(n)) assert.ok(n.styles[ref], 'class refs follow the rename');
+  }
+});
+
+test('inline: expanded-subtree custom_css stays OFF by default and is recoverable with componentRawCss', () => {
+  const mk = () => {
+    resetIds();
+    const Card = defineComponent(() => h('box', { pad: 24, raw: 'backdrop-filter:blur(4px);' }, h('text', {}, 'c')), { title: 'Opt Card' });
+    const b = buildBundle('site', h('box', {}, h(Card, {}), h('box', { pad: 0, raw: 'opacity:.5;' })));
+    inlineLocal(b);
+    return b;
+  };
+  // DEFAULT: byte-parity with what an inline page has always rendered — a component tree's
+  // custom_css no-ops on free Elementor, so newly emitting it would CHANGE live pages.
+  const off = carrierOf(expandLikeDeploy(mk()));
+  assert.match(off, /opacity:\.5/, 'the page\'s own raw CSS is still there');
+  assert.doesNotMatch(off, /backdrop-filter/, 'the component subtree\'s is not, by default');
+  const on = carrierOf(expandLikeDeploy(mk(), { componentRawCss: true }));
+  assert.match(on, /backdrop-filter:blur\(4px\)/, 'opt-in recovers it');
+});
+
+test('inline: re-emitting is IDEMPOTENT (no duplicate carriers, byte-identical CSS)', () => {
+  const b = buildBundle('site', h('box', { pad: 0, raw: 'opacity:.5;' }, h('text', { size: 14, raw: 'color:red;' }, 'x')));
+  inlineLocal(b);
+  const before = carrierOf(b.pages[0]);
+  reinlineTree(b, b.pages[0], 0);
+  reinlineTree(b, b.pages[0], 0);
+  assert.equal(b.pages[0].elements.filter((n) => n.widgetType === 'html').length, 1);
+  assert.equal(carrierOf(b.pages[0]), before);
+});
+
+test('normalizeIds: style-id rekey is anchored to the id segment (a salt containing the id cannot steal it)', () => {
+  // hand-built: element e00007 whose salt literally contains its own id string
+  const els = [{ id: 'e00007', elType: 'widget', widgetType: 'e-heading', elements: [],
+    settings: { classes: { $$type: 'classes', value: ['e-1e00007-e00007-s'] } },
+    styles: { 'e-1e00007-e00007-s': { id: 'e-1e00007-e00007-s', type: 'class', variants: [] } } }];
+  normalizeIds(els);
+  assert.equal(els[0].id, 'e00000');
+  assert.deepEqual(Object.keys(els[0].styles), ['e-1e00007-e00000-s'], 'the SALT is left intact; only the id segment moves');
+  assert.deepEqual(els[0].settings.classes.value, ['e-1e00007-e00000-s']);
 });
 
 test('inline: per-state custom_css keeps its state selector (hover gets the :hover,:focus-visible comma pair) — 1.7.x', () => {

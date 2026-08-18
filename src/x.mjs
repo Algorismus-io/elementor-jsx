@@ -28,8 +28,17 @@ export {
 export {
   FLEX, sx, splitStates, applyStates, bgImage, box, styled, bindClass, h2, h3, txt, eyebrow, accentHeading, sectionHeader,
   section, card, bento, cardGrid, stat, step, chip, logoStrip, testimonial, footer, ctaBand,
-  navBar, browserMock, barChart, lineChart, donut, chatMock
+  navBar, browserMock, barChart, lineChart, donut, chatMock,
+  skipLink, srOnly, focusRing, keyboardScrollable, SR_ONLY_CSS
 } from './kit/kit-components.mjs';
+
+/* compile-time accessibility (see src/a11y.mjs + docs/A11Y.md) */
+export {
+  analyzeContrast, analyzePageContrast, contrastRatio, contrastRatioExact, meetsRatio, relativeLuminance, parseColor, composite,
+  isLargeText, requiredRatio, landmarkSettings, readLandmark, LANDMARKS, UNIQUE_LANDMARKS,
+  variableMap, colorFromEnvelope, backgroundFromEnvelope, nodeProps, nodeText, toHex,
+  suggestAccessibleColor, rgbToHsl, rawCssOf
+} from './a11y.mjs';
 
 export {
   defineTheme

@@ -383,3 +383,114 @@ test('lint: raw-atomic-overlap still fires on expressible raw — incl. multi-la
   assert.match(f[0].message, /raw CSS sets \[box-shadow, padding\]/);
   assert.match(f[0].fix, /shadow=\{\[\[v,blur,spread,color,h\],\[…\]\]\}/);
 });
+
+/* ── the accessibility tier (opt-in; see A11Y_RULES in lint.mjs) ────────────── */
+
+const a11yBuild = (node, a11y) => compileSite(defineSite({ name: 'lint-a11y', a11y, pages: [page('home', node)] }));
+
+test('lint a11y: the tier is OFF by default — adding it cannot break an existing CI gate', () => {
+  // deliberately awful: 1.2:1 contrast, no landmarks, no main
+  const b = a11yBuild(h('box', { bg: '#ffffff' }, h('text', { color: '#eeeeee' }, 'invisible copy')));
+  const off = lintBundle(b);
+  assert.equal(off.findings.filter((f) => f.rule.startsWith('contrast') || f.rule.startsWith('landmark-')).length, 0,
+    'no a11y rule may fire unless the tier is explicitly enabled');
+  const on = lintBundle(b, { a11y: 'error' });
+  assert.ok(of(on, 'contrast').length > 0, 'the same bundle must fail once the tier is on');
+});
+
+test('lint a11y: severity follows the configured level', () => {
+  const b = a11yBuild(h('box', { bg: '#ffffff' }, h('text', { color: '#eeeeee' }, 'invisible copy')));
+  assert.equal(of(lintBundle(b, { a11y: 'warn' }), 'contrast')[0].severity, 'warn');
+  assert.equal(of(lintBundle(b, { a11y: 'error' }), 'contrast')[0].severity, 'error');
+  // best-practice landmark rules sit one notch BELOW contrast — they are not conformance failures
+  assert.equal(of(lintBundle(b, { a11y: 'error' }), 'landmark-main')[0].severity, 'warn');
+});
+
+test('lint a11y: a site can opt in permanently through its own config', () => {
+  const b = a11yBuild(h('box', { bg: '#ffffff' }, h('text', { color: '#eeeeee' }, 'invisible copy')), { level: 'error' });
+  assert.equal(b.a11y.level, 'error', 'the level must ride along in the bundle');
+  assert.ok(of(lintBundle(b), 'contrast').length > 0, 'no flag needed — the bundle carries its own level');
+});
+
+test('lint a11y: an unknown level is rejected loudly', () => {
+  const b = a11yBuild(h('box', {}, h('text', {}, 'x')));
+  assert.throws(() => lintBundle(b, { a11y: 'strict' }), /a11y level/);
+});
+
+test('lint a11y: contrast reports the ratio, the pair and the threshold that applied', () => {
+  const b = a11yBuild(h('box', { bg: '#ffffff' }, h('text', { color: '#bbbbbb', size: 16 }, 'grey on white')));
+  const [f] = of(lintBundle(b, { a11y: 'error' }), 'contrast');
+  assert.match(f.message, /needs 4\.5:1/);
+  assert.match(f.message, /#bbbbbb on #ffffff/);
+  assert.match(f.message, /grey on white/);
+});
+
+test('lint a11y: an UNRESOLVED pair is reported as unchecked, never as a pass', () => {
+  const b = a11yBuild(h('box', { bgImage: 'https://cdn.example.com/h.jpg' }, h('h1', { color: '#fff' }, 'over an image')));
+  const r = lintBundle(b, { a11y: 'error' });
+  assert.equal(of(r, 'contrast').length, 0, 'it is not a failure — we genuinely do not know');
+  const [u] = of(r, 'contrast-unresolved');
+  assert.match(u.message, /NOT CHECKED/);
+  assert.match(u.message, /background image/);
+});
+
+test('lint a11y: a clean page states what contrast it actually PROVED', () => {
+  const b = a11yBuild(h('box', { bg: '#ffffff', landmark: 'main' }, h('text', { color: '#222222' }, 'readable')));
+  const r = lintBundle(b, { a11y: 'error' });
+  assert.equal(of(r, 'contrast').length, 0);
+  assert.ok(r.verified.some((v) => /meet WCAG 2\.2 SC 1\.4\.3 AA/.test(v)),
+    'silence must be distinguishable from "never looked" — that is the whole overlay critique');
+});
+
+test('lint a11y: landmark-main fires when no main landmark exists, and clears when one does', () => {
+  const without = a11yBuild(h('box', { bg: '#fff' }, h('text', { color: '#222' }, 'body')));
+  assert.equal(of(lintBundle(without, { a11y: 'warn' }), 'landmark-main').length, 1);
+  const with_ = a11yBuild(h('box', { landmark: 'main', bg: '#fff' }, h('text', { color: '#222' }, 'body')));
+  assert.equal(of(lintBundle(with_, { a11y: 'warn' }), 'landmark-main').length, 0);
+});
+
+test('lint a11y: duplicate unique landmarks are flagged', () => {
+  const b = a11yBuild(h('box', {},
+    h('box', { landmark: 'banner' }, h('text', {}, 'a')),
+    h('box', { landmark: 'banner' }, h('text', {}, 'b'))));
+  const [f] = of(lintBundle(b, { a11y: 'warn' }), 'landmark-duplicate');
+  assert.match(f.message, /2 "banner" landmarks/);
+});
+
+test('lint a11y: Pro-only landmarks are called out as not rendering on free Elementor', () => {
+  const b = a11yBuild(h('box', { landmark: 'main' }, h('text', {}, 'body')));
+  const [f] = of(lintBundle(b, { a11y: 'warn' }), 'landmark-needs-pro');
+  assert.equal(f.severity, 'info');
+  assert.match(f.message, /FREE Elementor does not emit/);
+});
+
+test('lint a11y: a link with no text is flagged as unnamed', () => {
+  const b = a11yBuild(h('box', {}, h('text', { href: '/pricing' }, '')));
+  assert.ok(of(lintBundle(b, { a11y: 'error' }), 'link-name').length >= 1);
+});
+
+test('lint a11y: repeated generic link text is PROMPTED, not failed', () => {
+  const b = a11yBuild(h('box', {},
+    h('text', { href: '/a' }, 'Read more'),
+    h('text', { href: '/b' }, 'Read more'),
+    h('text', { href: '/c' }, 'Read more')));
+  const [f] = of(lintBundle(b, { a11y: 'error' }), 'generic-link-text');
+  assert.equal(f.severity, 'warn', 'one notch below contrast — in-context naming can be legitimate');
+  assert.match(f.message, /3 links share generic text/);
+});
+
+test('lint a11y: a page that is genuinely clean produces no a11y findings at all', () => {
+  const b = a11yBuild(h('box', { landmark: 'main', bg: '#ffffff' },
+    h('h1', { color: '#111111', size: 40 }, 'Title'),
+    h('text', { color: '#333333', size: 16 }, 'Body copy that reads fine.'),
+    h('text', { href: '/pricing', color: '#1a4d80' }, 'See the pricing guide')));
+  const r = lintBundle(b, { a11y: 'error' });
+  const a11yFindings = r.findings.filter((f) => /^(contrast|landmark-main|landmark-duplicate|link-name|generic-link-text)/.test(f.rule));
+  assert.deepEqual(a11yFindings, [], formatLint(r));
+});
+
+test('lint a11y: the contrast fix names a concrete replacement colour', () => {
+  const b = a11yBuild(h('box', { bg: '#0b0f10' }, h('text', { color: '#4A5A57', size: 14 }, 'muted label')));
+  const [f] = of(lintBundle(b, { a11y: 'error' }), 'contrast');
+  assert.match(f.fix, /set the text colour to #[0-9a-f]{6}/, `fix was: ${f.fix}`);
+});
