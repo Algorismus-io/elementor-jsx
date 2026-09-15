@@ -42,8 +42,17 @@ export function extractClasses(elements) {
       const key = stable(st.variants);
       let cls = byHash.get(key);
       if (!cls) {
-        const label = uniqueLabel(st.__cls || `c-${djb2(key).slice(0, 6)}`);
-        cls = { id: `g-${label}`, label, type: 'class', variants: st.variants };
+        const hash = djb2(key).slice(0, 6);
+        const label = uniqueLabel(st.__cls || `c-${hash}`);
+        // The id MUST be content-addressed, not label-addressed. `takenLabels` only dedupes within
+        // ONE extractClasses() call, so two pages built or deployed separately that both use
+        // __cls:'hero' with DIFFERENT styles used to emit the same id `g-hero`. Global-class
+        // deploys are additive, so the second write was silently dropped and the page rendered
+        // with the first page's styles — no error, wrong colours. Suffixing the content hash makes
+        // identical styles share an id (correct reuse) and different styles diverge (no collision).
+        // When there is no semantic hint the label is already `c-<hash>`, so don't repeat it.
+        const id = st.__cls ? `g-${label}-${hash}` : `g-${label}`;
+        cls = { id, label, type: 'class', variants: st.variants };
         byHash.set(key, cls);
         order.push(cls.id);
       }

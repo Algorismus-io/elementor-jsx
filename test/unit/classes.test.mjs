@@ -59,7 +59,8 @@ test('labels: cls hint names the class semantically; content-hash fallback other
   const labels = reg.order.map((id) => reg.items[id].label);
   assert.ok(labels.includes('body-copy'));
   assert.ok(labels.some((l) => /^c-[0-9a-z]{1,6}$/.test(l)), 'hash-named fallback present');
-  assert.ok(reg.order.includes('g-body-copy'), 'id = g-<label>');
+  // id is CONTENT-addressed (g-<label>-<hash>), not label-addressed — see classes.mjs.
+  assert.ok(reg.order.some((id) => /^g-body-copy-[0-9a-z]{1,6}$/.test(id)), 'id = g-<label>-<hash>');
 });
 
 test('labels: same cls hint + DIFFERENT styles → auto-suffixed (card, card-2)', () => {
@@ -72,7 +73,9 @@ test('labels: same cls hint + DIFFERENT styles → auto-suffixed (card, card-2)'
 test('labels: same cls hint + SAME style → one class, no suffix', () => {
   const els = build(h('box', {}, h('text', { size: 14, cls: 'card' }, 'a'), h('text', { size: 14, cls: 'card' }, 'b')));
   const reg = extractClasses(els);
-  assert.deepEqual(reg.order.filter((id) => id.includes('card')), ['g-card']);
+  const cardIds = reg.order.filter((id) => id.includes('card'));
+  assert.equal(cardIds.length, 1, 'identical style + same hint collapses to ONE class');
+  assert.ok(/^g-card-[0-9a-z]{1,6}$/.test(cardIds[0]), 'id carries the content hash');
 });
 
 test('refs: external gcls refs are PRESERVED alongside the assigned shared class', () => {
@@ -86,7 +89,8 @@ test('refs: external gcls refs are PRESERVED alongside the assigned shared class
 test('registry shape: items keyed by id, {id,label,type:class,variants}', () => {
   const els = build(h('text', { size: 14, cls: 'x' }, 'a'));
   const reg = extractClasses(els);
-  const item = reg.items['g-x'];
+  const xid = reg.order.find((id) => id.startsWith('g-x-'));
+  const item = reg.items[xid];
   assert.equal(item.type, 'class');
   assert.equal(item.variants.length, 1);
   assert.deepEqual(Object.keys(item).sort(), ['id', 'label', 'type', 'variants']);
@@ -115,4 +119,20 @@ test('scale: 100 identical cards → exactly ONE card class (the 482→33 mechan
   // outer box + card + h3 + text = 4 shared classes for 301 styled nodes
   assert.equal(reg.order.length, 4);
   assert.equal(reg.order.filter((id) => id.includes('card')).length, 1);
+});
+
+test('collision: same cls hint + DIFFERENT styles across SEPARATE builds → distinct ids', () => {
+  // Regression for the silent-drop bug: global-class deploys are additive, so two pages built
+  // separately that both used cls:'hero' with different styles emitted the same id `g-hero`.
+  // The second deploy was discarded and the page rendered with the first page's colours.
+  const pageA = build(h('box', { bg: '#0f1b2b', cls: 'hero' }, h('text', {}, 'a')));
+  const pageB = build(h('box', { bg: '#2f7ae5', cls: 'hero' }, h('text', {}, 'b')));
+  const A = extractClasses(pageA), B = extractClasses(pageB);
+  const idA = A.order.find((i) => i.includes('hero'));
+  const idB = B.order.find((i) => i.includes('hero'));
+  assert.notEqual(idA, idB, 'different styles must not share a global-class id');
+
+  // and identical styles across separate builds MUST still converge, or dedup is broken
+  const C = extractClasses(build(h('box', { bg: '#0f1b2b', cls: 'hero' }, h('text', {}, 'c'))));
+  assert.equal(C.order.find((i) => i.includes('hero')), idA, 'identical styles must share an id');
 });

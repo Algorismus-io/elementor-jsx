@@ -110,6 +110,7 @@ async function build(entry) {
       for (const c of r.components || []) console.log(`  component ${c.action} "${c.title}"${c.id ? ` → id ${c.id}` : ''} (uid ${c.uid})`);
       if (r.componentsExpanded) console.log(`  components: ${r.componentsExpanded} inline-expanded (fallback — see WARN above)`);
       if (r.classesMerged) console.error(`WARN: ${r.classesMerged}`);
+      if (r.classesCache) console.error(`  ${r.classesCache}`);
       r.pages.forEach((p) => console.log(`  ${p.action} "${p.title}" → id ${p.id} (/${p.slug}/)`));
       const drifted = r.pages.filter((p) => p.action === 'skipped-drifted');
       if (drifted.length) console.error(`⚠ ${drifted.length} page(s) SKIPPED (drifted — hand-edited outside exjsx): ${drifted.map((p) => `/${p.slug}/`).join(', ')}. Re-run with --force to overwrite.`);

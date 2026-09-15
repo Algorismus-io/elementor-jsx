@@ -494,3 +494,30 @@ test('lint a11y: the contrast fix names a concrete replacement colour', () => {
   const [f] = of(lintBundle(b, { a11y: 'error' }), 'contrast');
   assert.match(f.fix, /set the text colour to #[0-9a-f]{6}/, `fix was: ${f.fix}`);
 });
+
+/* ── flex-row-pct-gap: %-width children in a gapped flex row provably overflow (deploy 422s) ── */
+test('lint: flex-row-pct-gap fires on two 50% children in a gapped row, spares grid and gapless rows', () => {
+  const bad = build(page('a', h('box', { dir: 'row', gap: 24, pad: 0 },
+    h('box', { w: '50%' }, h('h1', {}, 'left')),
+    h('box', { w: '50%' }, h('text', {}, 'right')))));
+  const f = of(lintBundle(bad), 'flex-row-pct-gap');
+  assert.equal(f.length, 1, formatLint(lintBundle(bad)));
+  assert.equal(f[0].severity, 'error');
+  assert.match(f[0].message, /gap 24px .* 2 direct children .* 100%/);
+  assert.match(f[0].fix, /grid-template-columns/);
+
+  // no gap → percentages add up fine
+  const gapless = build(page('a', h('box', { dir: 'row', gap: 0, pad: 0 },
+    h('box', { w: '50%' }, h('h1', {}, 'left')), h('box', { w: '50%' }, h('text', {}, 'right')))));
+  assert.equal(of(lintBundle(gapless), 'flex-row-pct-gap').length, 0);
+
+  // widths that leave room for the gap are fine
+  const room = build(page('a', h('box', { dir: 'row', gap: 24, pad: 0 },
+    h('box', { w: '40%' }, h('h1', {}, 'left')), h('box', { w: '40%' }, h('text', {}, 'right')))));
+  assert.equal(of(lintBundle(room), 'flex-row-pct-gap').length, 0);
+
+  // column direction never overflows horizontally
+  const col = build(page('a', h('box', { dir: 'column', gap: 24, pad: 0 },
+    h('box', { w: '50%' }, h('h1', {}, 'top')), h('box', { w: '50%' }, h('text', {}, 'bottom')))));
+  assert.equal(of(lintBundle(col), 'flex-row-pct-gap').length, 0);
+});

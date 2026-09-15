@@ -4,12 +4,13 @@
  * Connection from env: EXJSX_WPCLI (e.g. "docker exec wpos-stack-cli wp"), WP_URL/WP_USER/WP_APP_PASSWORD,
  * EXJSX_CLI (path to elementor-ultra cli.mjs). */
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalHash, decideDrift, shortHash } from './drift.mjs';
 import { rewriteComponentIds, expandInstances, referencedComponentUids } from './component.mjs';
 import { normalizeIds } from './compile.mjs';
+import { djb2 } from './classes.mjs';
 import { reinlineTree } from './inline.mjs';
 // Pro-only atomic types, shared with lint.mjs's OFFLINE pro-only-element warning: lint cannot know
 // the deploy target, this module can — so the hard gate lives here and the lint rule only flags risk.
@@ -386,6 +387,9 @@ export async function deployBundle(bundle, cfg = {}) {
     // Own the namespace: delete classes currently in the kit that this build doesn't declare (orphan
     // cleanup). Single-site-per-kit assumption — for a shared kit, scope by a class-name prefix instead.
     let deleted = [];
+    let residentList = [];
+    // hoisted: used by the merge block AND by the post-PUT cache write below
+    const cacheDir = join(tmpdir(), 'exjsx-classcache');
     try {
       const cur = await (await fetch(`${wpUrl}/wp-json/elementor/v1/global-classes`, { headers: { Authorization: auth } })).json();
       // response-shape drift (caught by the test suite): current Elementor returns {data:[{id,label}…]}
@@ -393,6 +397,7 @@ export async function deployBundle(bundle, cfg = {}) {
       // silent no-op (the registry only ever GREW). Handle every observed shape.
       const list = Array.isArray(cur) ? cur : Array.isArray(cur?.data) ? cur.data : Object.values((cur?.data || cur)?.items || {});
       const newIds = new Set(bundle.classes.order);
+      residentList = list;
       deleted = list.map((c) => c.id).filter((id) => id && !newIds.has(id));
     } catch { /* first deploy — nothing to clean */ }
     // FOREIGN-STORE guard: orphan cleanup assumes the site was built from THIS project. Deploying a
@@ -402,23 +407,60 @@ export async function deployBundle(bundle, cfg = {}) {
     // guard built for exactly this). If we'd delete more than we declare, the store isn't ours:
     // MERGE (keep the residents, add/update ours) unless --own-classes forces old semantics.
     let items = bundle.classes.items, order = bundle.classes.order, merged = 0;
-    if (!cfg.ownClasses && deleted.length >= 5 && deleted.length > bundle.classes.order.length) {
+    // MERGE IS THE DEFAULT. It used to be gated on `deleted.length >= 5 && deleted.length >
+    // bundle.classes.order.length` — a size heuristic that silently failed for the commonest case
+    // of all: a SIBLING PAGE of similar size on the same site. Deploying page B (19 classes) over
+    // page A (20 classes) satisfied neither guard reliably, so A's classes were deleted as
+    // "orphans", A's element refs were left dangling, and A rendered unstyled — with the deploy
+    // reporting success. Measured 2026-08-27: two benchmark pages, second deploy left 19 classes
+    // total instead of 39, and page A lost 4 of its 6 colours.
+    // Now: never delete classes this bundle does not declare unless --own-classes is explicit.
+    if (!cfg.ownClasses && deleted.length) {
+      // Reading every resident definition is the expensive part: the route pages at 100, so a site
+      // near Elementor's 1000-class cap costs ~10 sequential round-trips on EVERY non-inline deploy
+      // (measured ~0.7-1.0s per page). Two cheap mitigations, both fail-safe — any miss or error
+      // falls back to the full read, so a stale cache can never produce a wrong write:
+      //   1. FINGERPRINT CACHE. We are normally the only writer, so if the store's {id,label} set is
+      //      byte-identical to the one present right after our last PUT, the variants are unchanged
+      //      too. Cache is keyed by site URL and validated by that fingerprint.
+      //   2. EARLY EXIT. We only need definitions for `deleted` (the residents we must preserve),
+      //      not the whole store — stop paging the moment every needed id is in hand.
       const foreign = {};
+      const fp = djb2(JSON.stringify(residentList.map((c) => [c.id, c.label]).sort()));
+      const cacheFile = join(cacheDir, `${djb2(String(wpUrl))}.json`);
+      let cacheHit = false;
       try {
-        let cursor = '';
-        do {
-          const pg = await (await fetch(`${wpUrl}/wp-json/elementor-ultra/v1/design/classes?per_page=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: { Authorization: auth } })).json();
-          const d = pg?.data || pg;
-          for (const it of d?.items || []) if (it?.id && it.variants) foreign[it.id] = it;
-          cursor = d?.next_cursor || '';
-        } while (cursor);
-      } catch { /* no plugin route — fall through to the throw below */ }
+        if (existsSync(cacheFile)) {
+          const cached = JSON.parse(readFileSync(cacheFile, 'utf8'));
+          if (cached.fp === fp) for (const it of cached.items || []) if (it?.id && it.variants) foreign[it.id] = it;
+          cacheHit = cached.fp === fp && deleted.every((id) => foreign[id]);
+          if (!cacheHit) for (const k of Object.keys(foreign)) delete foreign[k];
+        }
+      } catch { /* unreadable cache is simply a miss */ }
+      if (!cacheHit) {
+        try {
+          let cursor = '';
+          do {
+            const pg = await (await fetch(`${wpUrl}/wp-json/elementor-ultra/v1/design/classes?per_page=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: { Authorization: auth } })).json();
+            const d = pg?.data || pg;
+            for (const it of d?.items || []) if (it?.id && it.variants) foreign[it.id] = it;
+            cursor = d?.next_cursor || '';
+            if (deleted.every((id) => foreign[id])) break;   // early exit: we have what we need
+          } while (cursor);
+        } catch { /* no plugin route — fall through to the throw below */ }
+      }
+      report.classesCache = cacheHit ? 'resident definitions served from cache' : undefined;
       const gotAll = deleted.every((id) => foreign[id]);
       if (!gotAll) {
-        throw new Error(`deploy: this site's class store holds ${deleted.length} classes this bundle doesn't declare — it looks like another project lives here, and the full store couldn't be read for a safe merge. Deploy to a fresh site, or pass --own-classes to intentionally replace the store.`);
+        throw new Error(`deploy: this site's class store holds ${deleted.length} class(es) this bundle doesn't declare (they likely belong to sibling pages), and the store couldn't be read in full to merge them. Writing anyway would delete them and leave those pages unstyled. Fix the plugin route, deploy to a fresh site, or pass --own-classes to intentionally replace the whole store.`);
       }
       items = { ...Object.fromEntries(deleted.map((id) => [id, foreign[id]])), ...bundle.classes.items };
-      order = [...deleted, ...bundle.classes.order.filter((id) => !foreign[id])];
+      // `deleted` (residents this bundle does not declare) and `bundle.classes.order` (the ones it
+      // does) are disjoint by construction, so simple concatenation is correct. The old
+      // `.filter((id) => !foreign[id])` dropped OUR OWN ids whenever they were already resident —
+      // harmless when merging was a rare fallback, a silent every-redeploy regression now that
+      // merge is the default path.
+      order = [...deleted, ...bundle.classes.order];
       merged = deleted.length;
       deleted = [];
     }
@@ -431,7 +473,24 @@ export async function deployBundle(bundle, cfg = {}) {
     });
     report.classes = res.ok ? bundle.classes.order.length : `ERR ${res.status}: ${(await res.text()).slice(0, 120)}`;
     report.orphansDeleted = deleted.length;
-    if (merged) report.classesMerged = `${merged} resident class(es) preserved (foreign store — use --own-classes to replace)`;
+    // Cache the store we just wrote, fingerprinted by the {id,label} set it now has. The next
+    // deploy's cheap ids-only GET recomputes that fingerprint; on a match it skips the paginated
+    // definition read entirely. Any mismatch (someone edited classes in the Class Manager, another
+    // project deployed here) simply misses and falls back to the full read.
+    if (res.ok) {
+      try {
+        // Fingerprint what the SERVER now holds, not what we believe we sent — Elementor normalises
+        // the store on write, so a locally-derived fingerprint never matched the next run's read.
+        // One cheap ids-only GET here buys skipping ~10 paginated definition reads next time.
+        const after = await (await fetch(`${wpUrl}/wp-json/elementor/v1/global-classes`, { headers: { Authorization: auth } })).json();
+        const afterList = Array.isArray(after) ? after : Array.isArray(after?.data) ? after.data : Object.values((after?.data || after)?.items || {});
+        const wroteFp = djb2(JSON.stringify(afterList.map((c) => [c.id, c.label]).sort()));
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(join(cacheDir, `${djb2(String(wpUrl))}.json`),
+          JSON.stringify({ fp: wroteFp, items: order.map((id) => items[id]).filter(Boolean) }));
+      } catch { /* caching is an optimisation; never fail a deploy for it */ }
+    }
+    if (merged) report.classesMerged = `${merged} resident class(es) preserved (merge is the default — use --own-classes to replace the store instead)`;
   }
 
   // 1b-2) COMPONENTS (spec 2.0) — create-or-reuse-or-UPDATE BEFORE pages so every e-component

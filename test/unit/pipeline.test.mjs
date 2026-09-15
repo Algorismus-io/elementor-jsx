@@ -29,10 +29,16 @@ test('cli build: fixture .jsx → bundle with pages, variables, dedup stats', ()
   // dedup really happened: 3 identical Cards + 6 cells collapse
   assert.ok(b.stats.localStylesBefore > b.stats.sharedClasses, `dedup: ${b.stats.localStylesBefore} → ${b.stats.sharedClasses}`);
   // semantic labels made it through esbuild+compile
-  assert.ok(b.classes.order.includes('g-t-card'), 't-card class');
-  assert.ok(b.classes.order.includes('g-t-hero'), 't-hero class');
-  // card class is shared ACROSS pages (only one t-card in the registry)
-  assert.equal(b.classes.order.filter((id) => id.startsWith('g-t-card')).length, 1);
+  // ids are content-addressed now (g-<label>-<hash>), so match on the semantic prefix
+  assert.ok(b.classes.order.some((id) => id.startsWith('g-t-card')), 't-card class');
+  assert.ok(b.classes.order.some((id) => id.startsWith('g-t-hero')), 't-hero class');
+  // The 3 IDENTICAL cards on Home collapse to one class. The card on the second page is NOT
+  // identical — it sits outside a <row>, so it carries no flex-child props — and therefore gets
+  // its own class. The old label-addressed id merged the two, silently giving one of the pages
+  // the other's styling; that is the collision bug (see classes.mjs).
+  const cardIds = b.classes.order.filter((id) => id.startsWith('g-t-card'));
+  assert.equal(cardIds.length, 2, 'two genuinely different card styles stay distinct');
+  assert.ok(cardIds.every((id) => /^g-t-card-[0-9a-z]{1,6}$/.test(id)), 'ids are content-addressed');
 
   // theme var binding survived: hero heading color is a live variable ref
   const flat = [];

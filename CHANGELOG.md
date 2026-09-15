@@ -1,5 +1,43 @@
 # Changelog
 
+## 2.2.0
+
+**Two sibling pages on one site no longer destroy each other's styles.** Deploying page B to a site
+that already held page A silently deleted A's global classes and left A rendering unstyled — with
+both deploys reporting success. Measured on a two-page benchmark: the second deploy left **19
+classes where there should have been 39**, and page A lost 4 of its 6 colours. Both halves are fixed.
+
+*Global-class ids are now content-addressed.* The id came from the label, so two pages built
+separately that both used `cls="hero"` with **different** styles emitted the same id `g-hero`. The
+`takenLabels` guard only dedupes within a single `extractClasses()` call, so nothing caught it
+across pages or deploys — the second definition was dropped and the page silently inherited the
+first page's styling. Ids are now `g-<label>-<contentHash>`: identical styles still collapse to one
+class (reuse is preserved), different styles can no longer collide. This also surfaced a live case
+in our own fixture, where two genuinely different card styles had been merged into one class.
+
+*Merging the class registry is now the default, not a heuristic.* Orphan cleanup was skipped only
+when `deleted.length >= 5 && deleted.length > bundle.classes.order.length` — a size comparison that
+fails for the commonest case of all, a sibling page of similar size. `deploy` now never deletes
+classes the bundle doesn't declare unless `--own-classes` is passed explicitly.
+
+*Merging is also cheaper than the old fallback was.* Reading every resident class definition pages
+at 100 per request, so a site near Elementor's 1000-class cap cost ~10 sequential round-trips per
+deploy. Two fail-safe mitigations: a per-site fingerprint cache under `$TMPDIR/exjsx-classcache/`
+(validated against the store's `{id,label}` set after every PUT — any drift misses and falls back
+to the full read) and an early exit once every needed definition is in hand. `deploy` prints
+`resident definitions served from cache` when the cache hit.
+
+**New lint error: `flex-row-pct-gap`.** CSS does not subtract `gap` from a percentage width, so two
+50% children in a `gap:24px` row need 100% + 24px and overflow, shrink unevenly, or wrap. The Ultra
+plugin's tree validator already rejects this at deploy (422 ATOMIC_SETTINGS_INVALID), but lint passed
+the same bundle with exit 0 — 7 of 50 generated pages in a benchmark linted clean and then failed
+exactly here. Lint now fails first and points at the gap-aware primitive (grid + `1fr` columns).
+
+> **Upgrade note.** Class ids change for every page. Redeploying an existing site emits new ids and
+> new CSS; the old classes are now *preserved* rather than deleted, so nothing breaks visually, but
+> the registry will carry the superseded ids until they are pruned. Review before shipping to a
+> live site, and consider `--own-classes` on a site you intend to fully re-own.
+
 ## 2.1.1
 
 **Everything `exjsx import` emits for a real-world page got measurably closer to the source.** Ten

@@ -214,6 +214,58 @@ function* allInteractions(bundle) {
 
 const RULES = [
   {
+    /* %-WIDTH CHILDREN IN A GAPPED FLEX ROW = OVERFLOW. CSS does not subtract `gap` from a
+     * percentage width, so two 50% children in a row with gap:24px need 100% + 24px and either
+     * overflow, shrink unevenly, or wrap to fewer-per-row. The Ultra plugin's tree validator
+     * already rejects this (422 ATOMIC_SETTINGS_INVALID), but ONLY at deploy — lint passed the
+     * same bundle with exit 0, so an authoring agent got a clean lint and then a hard failure it
+     * could not have predicted. Measured 2026-08-28: 7 of 50 generated pages failed exactly here
+     * after linting clean. Grid is the gap-aware primitive; this is an ERROR because the page
+     * provably will not deploy. */
+    id: 'flex-row-pct-gap', severity: 'error',
+    run(bundle) {
+      const items = bundle.classes?.items || {};
+      // effective desktop props = referenced global classes (in order) then local styles on top
+      const propsOf = (n) => {
+        const out = {};
+        const take = (variants) => {
+          for (const v of variants || []) {
+            const bp = v?.meta?.breakpoint;
+            if (bp && bp !== 'desktop') continue;
+            if (v?.meta?.state) continue;
+            Object.assign(out, v.props || {});
+          }
+        };
+        for (const id of n.settings?.classes?.value || []) take(items[id]?.variants);
+        for (const st of Object.values(n.styles || {})) take(st.variants);
+        return out;
+      };
+      const sizeOf = (v) => (v && v.$$type === 'size' && v.value && typeof v.value.size === 'number')
+        ? { n: v.value.size, unit: v.value.unit } : null;
+      const out = [];
+      for (const page of pagesAndParts(bundle)) {
+        for (const { n } of walk(page.elements)) {
+          const kids = n.elements || [];
+          if (kids.length < 2) continue;
+          const p = propsOf(n);
+          const display = p.display?.value;
+          const dir = p['flex-direction']?.value ?? 'row';
+          if (display !== 'flex' || !/^row/.test(String(dir))) continue;
+          const gap = sizeOf(p.gap) || (p.gap?.value?.column ? sizeOf(p.gap.value.column) : null);
+          if (!gap || !(gap.n > 0)) continue;
+          const pct = kids.map((k) => sizeOf(propsOf(k).width)).filter((w) => w && w.unit === '%');
+          if (pct.length < 2) continue;
+          const sum = pct.reduce((a, w) => a + w.n, 0);
+          if (sum < 100) continue;
+          out.push(F(this.id, this.severity, `${page.slug ?? page.type}#${n.id}`,
+            `flex row with gap ${gap.n}${gap.unit} has ${pct.length} direct children whose %-widths sum to ${Math.round(sum)}% — CSS does not subtract the gap from a percentage, so the row needs ${Math.round(sum)}% + ${gap.n}${gap.unit} and will overflow, shrink unevenly, or wrap to fewer-per-row`,
+            'use the gap-aware primitive instead: display:"grid", grid-template-columns:"repeat(N, 1fr)", gap — children then need NO width at all. This is rejected at deploy (422 ATOMIC_SETTINGS_INVALID), so it is an error, not a preference'));
+        }
+      }
+      return out;
+    },
+  },
+  {
     // Field report (50-page run): 13 of 50 pages shipped shattered eyebrows because `ls={1.6}`
     // reads as pixels but compiles to 1.6em — 20.8px of tracking on a 13px label. Bare ls numbers
     // are em by convention; `lh` already guards this by magnitude (v > 4 → px) but `ls` never did.
