@@ -8,7 +8,8 @@ import { h, render, renderPage, Fragment, useTheme, useCtx } from '../../src/run
 import { defineTheme } from '../../src/theme.mjs';
 import { resetIds, deskProps, styleOf, customCssOf, textOf, classRefs, findNode, byWidget } from '../helpers.mjs';
 import { S, C, SZ, DIM, HUG } from '../../src/kit/kit.mjs';
-import { txt as ktxt } from '../../src/kit/kit-components.mjs';
+import { txt as ktxt, normalizeBgPosition, normalizeBgSize,
+} from '../../src/kit/kit-components.mjs';
 
 beforeEach(() => resetIds());
 
@@ -277,4 +278,36 @@ test('id prop → settings._cssid on containers, headings, text and img', async 
   assert.equal(render(h('h2', { id: 'features' }, 'X')).settings._cssid.value, 'features');
   assert.equal(render(h('text', { id: 'note' }, 'X')).settings._cssid.value, 'note');
   assert.equal(render(h('img', { id: 'shot', src: 'https://x.co/a.png' })).settings._cssid.value, 'shot');
+});
+
+
+/* ── overlay size/position are UNIONS, and the string member is a keyword enum only ──
+ * A `50% 50%` pair passed as a string returns `background: invalid_value` from the class-registry
+ * PUT. That was invisible for a long time because `--inline` skips the class PUT entirely. */
+
+test('normalizeBgPosition: exact percentage pairs become keywords, in Elementor vertical-first order', () => {
+  const str = (v) => normalizeBgPosition(v).value;
+  assert.equal(str('50% 50%'), 'center center');
+  assert.equal(str('0% 0%'), 'top left');
+  assert.equal(str('50% 0%'), 'top center');      // CSS is "x y"; the enum reads "<vert> <horiz>"
+  assert.equal(str('100% 50%'), 'center right');
+  assert.equal(str('top left'), 'top left');      // already a keyword — passed through
+});
+
+test('normalizeBgPosition: non-keyword offsets use background-image-position-offset', () => {
+  const o = normalizeBgPosition('12px 40px');
+  assert.equal(o.$$type, 'background-image-position-offset');
+  assert.deepEqual(o.value.x, { $$type: 'size', value: { unit: 'px', size: 12 } });
+  assert.deepEqual(o.value.y, { $$type: 'size', value: { unit: 'px', size: 40 } });
+  // anything unrepresentable falls back to a VALID keyword, never an invalid string
+  assert.equal(normalizeBgPosition('somewhere odd').value, 'center center');
+});
+
+test('normalizeBgSize: keyword enum vs background-image-size-scale', () => {
+  for (const k of ['cover', 'contain', 'auto']) assert.equal(normalizeBgSize(k).value, k);
+  const sc = normalizeBgSize('100% 1px');
+  assert.equal(sc.$$type, 'background-image-size-scale');
+  assert.deepEqual(sc.value.width, { $$type: 'size', value: { unit: '%', size: 100 } });
+  assert.deepEqual(sc.value.height, { $$type: 'size', value: { unit: 'px', size: 1 } });
+  assert.equal(normalizeBgSize('nonsense').value, 'cover');
 });

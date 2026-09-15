@@ -20,7 +20,11 @@ export function normalizeIds(elements) {
       const restyled = {};
       const map = {};
       for (const [sid, st] of Object.entries(node.styles)) {
-        const nsid = sid.replace(oldId, newId);
+        // rekey on the id SEGMENT (`…-<id>-s<N>`, every sid shape the compiler mints: `e-<id>-s`
+        // and inline's salted `e-<salt>-<id>-s`). A bare replace() takes the FIRST match, which a
+        // salt that happens to contain the id string would steal. Unknown shapes keep the old path.
+        const anchored = sid.replace(new RegExp(`(^|-)${oldId}(-s\\d*)$`), `$1${newId}$2`);
+        const nsid = anchored !== sid ? anchored : sid.replace(oldId, newId);
         map[sid] = nsid;
         restyled[nsid] = { ...st, id: nsid, label: st.label === oldId ? newId : st.label };
       }
@@ -103,7 +107,7 @@ export function compileSite(site) {
 }
 
 function compileSiteInner(site) {
-  const { name, theme, pages, parts } = site;
+  const { name, theme, pages, parts, a11y } = site;
   const respectReducedMotion = site.motion?.respectReducedMotion !== false;   // default ON
   const fonts = new Set();
   const classMaps = [];
@@ -164,6 +168,9 @@ function compileSiteInner(site) {
     pages: compiledPages,
     parts: compiledParts,                       // theme-builder templates (header/footer)
     components,                                 // native Elementor components (spec 2.0)
+    // a11y config rides along so `exjsx lint`/`deploy` on a stored bundle.json honour the site's
+    // chosen strictness without needing the source tree.
+    ...(a11y ? { a11y } : {}),
     stats: { localStylesBefore: localStyleCount, sharedClasses: classes.order.length, components: components.length },
     generatedBy: 'elementor-jsx',
   };

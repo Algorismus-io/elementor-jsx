@@ -17,8 +17,10 @@
  *   - pseudo-elements (::before/::after) are invisible to the DOM walk — decorative borders,
  *     underlays and animated sprites built on them are LOST (the emitted header comment says so).
  *   - inline links/spans inside a paragraph flatten to text (html-v3 whitelists em/strong/br only).
- *   - authored heights are indistinguishable from content-driven heights in computed styles —
- *     heights are not emitted (aspect-ratio/object-fit cover the img cases).
+ *   - authored heights ARE now recovered: the capture probes height:auto and re-measures, so
+ *     `absolute inset-0` overlays and `size-N` squares keep their size instead of collapsing.
+ *     The probe is limited to absolute/empty/square/absolute-children boxes so a flex-stretched
+ *     child never gets a hard height pinned onto it.
  *   - raw= CSS cannot vary per breakpoint (sx-mappable props diff into mobile={{…}}; raw deltas
  *     at 390 are dropped with a note).
  */
@@ -115,13 +117,21 @@ export function classify(n) {
 
 /** serialize a text leaf's children to whitelisted html-v3 markup (em/strong/br); other inline
  * elements flatten to their text (notes collects what was lost). */
-export function textRun(children, notes) {
+/** A run of inline children → html-v3 markup.
+ *  `recolor` opts in to carrying a COLOURED <span> through as <strong>: html-v3 whitelists only
+ *  em/strong/br, so `ENTER THE <span class="text-violet">VOID</span>` otherwise flattens and the
+ *  highlighted word silently renders in the heading's own colour. The caller pairs this with an
+ *  `& strong{color:…;font-weight:inherit}` rule so only the colour survives, not bolding. */
+export function textRun(children, notes, recolor = null) {
   const ser = (kids) => kids.map((c) => {
     if (c.hidden) return '';
     if (c.tag === '#text') return esc(c.text);
     if (c.tag === 'br') return '<br>';
     if (c.tag === 'em' || c.tag === 'i') return `<em>${ser(c.children || [])}</em>`;
     if (c.tag === 'strong' || c.tag === 'b') return `<strong>${ser(c.children || [])}</strong>`;
+    if (recolor && c.tag === 'span' && c.styles && c.styles.color === recolor) {
+      return `<strong>${ser(c.children || [])}</strong>`;
+    }
     if (c.tag === 'a' && notes) notes.add('inline <a> inside a text run flattened to plain text (html-v3 whitelists em/strong/br only)');
     else if (notes && c.tag !== 'span') notes.add(`inline <${c.tag}> flattened to plain text`);
     return ser(c.children || []);
@@ -133,8 +143,51 @@ export function textRun(children, notes) {
  * One captured element (+ its parent + the per-tag control) → { sx, raw[] }.
  * sx keys are the exjsx shorthand vocabulary (kit-components sx()); raw is CSS the atomic
  * schema has no home for. */
+
+/** A form control's computed styles → CSS. The atomic e-form widgets ship their own base skin, so
+ * every visual property has to be restated or the control renders at Elementor's default size —
+ * which is what made a natively-mapped form LOOK worse than the unstyled carrier it replaced. */
+function fieldCss(st, { grow = false, width = null, fills = false } = {}) {
+  const d = [];
+  const px = (v) => `${r1(num(v))}px`;
+  if (grow) d.push('flex:1 1 0%', 'min-width:0');
+  d.push('box-sizing:border-box');
+  // WIDTH. Without this every control hugs its content — the single most visible form defect.
+  if (fills) d.push('width:100%');
+  else if (width != null && width > 0) d.push(`width:${r1(width)}px`);
+  if (num(st.height) > 0) d.push(`height:${px(st.height)}`);
+  d.push(`padding:${px(st['padding-top'])} ${px(st['padding-right'])} ${px(st['padding-bottom'])} ${px(st['padding-left'])}`);
+  if (!isTransparent(st['background-color'])) d.push(`background:${cssColor(st['background-color'])}`);
+  const bw = num(st['border-top-width']);
+  if (bw > 0) d.push(`border:${px(st['border-top-width'])} ${st['border-top-style']} ${cssColor(st['border-top-color'])}`);
+  else d.push('border:0');
+  const rad = num(st['border-top-left-radius']);
+  if (rad > 0) d.push(`border-radius:${px(st['border-top-left-radius'])}`);
+  if (st['font-family']) d.push(`font-family:${st['font-family']}`);
+  if (num(st['font-size']) > 0) d.push(`font-size:${px(st['font-size'])}`);
+  if (st['font-weight']) d.push(`font-weight:${st['font-weight']}`);
+  if (st['line-height'] && st['line-height'] !== 'normal') d.push(`line-height:${px(st['line-height'])}`);
+  d.push(`letter-spacing:${!st['letter-spacing'] || st['letter-spacing'] === 'normal' ? 'normal' : px(st['letter-spacing'])}`);
+  if (st.color) d.push(`color:${cssColor(st.color)}`);
+  if (st['box-shadow'] && st['box-shadow'] !== 'none') d.push(`box-shadow:${st['box-shadow']}`);
+  if (st['text-align'] && st['text-align'] !== 'start') d.push(`text-align:${st['text-align']}`);
+  return d.join(';');
+}
+
+/** A colour at the given alpha, for reproducing element opacity as a background layer. */
+function veilOver(color, alpha) {
+  const m = /^#([0-9a-f]{6})$/i.exec(String(color).trim());
+  if (m) {
+    const n = parseInt(m[1], 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${Math.round(alpha * 100) / 100})`;
+  }
+  const r = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(String(color).trim());
+  return r ? `rgba(${r[1]}, ${r[2]}, ${r[3]}, ${Math.round(alpha * 100) / 100})` : null;
+}
+
 export function mapStyles(rec) {
-  const { tag, kind, s, c = {}, parent, rect, notes = new Set(), isRoot = false } = rec;
+  const { tag, kind, s, c = {}, parent, rect, notes = new Set(), isRoot = false,
+          authoredH = null, authoredW = null, insetBoth = false, insetBothX = false } = rec;
   const sx = {};
   const raw = [];
   const p = parent?.styles || null;
@@ -162,6 +215,26 @@ export function mapStyles(rec) {
     } else if (d === 'inline-block' || d === 'inline-flex') {
       sx.display = d;
     }
+    /* An inline-level box hugs its content. Elementor's flex parents stretch children, so a pill or
+     * badge that was `inline-flex` in the source renders full-width unless it is told not to. */
+    // An inline-level box hugs its content REGARDLESS of what its parent is — gating this on a flex
+    // parent left pills and icon buttons stretching to the full row once their frozen width was
+    // (correctly) removed. align-self only means anything inside a flex parent, so keep that gated.
+    if (d === 'inline-block' || d === 'inline-flex') {
+      raw.push('width:fit-content');
+      if (parentDisplay && parentDisplay.includes('flex')) raw.push('align-self:flex-start');
+    }
+  }
+  /* The same rule has to apply to TEXT leaves, and that is where it actually bites: a `<button>` or
+   * `<a class="inline-block px-8 py-4">` carrying a label classifies as text, not a container, so the
+   * container branch above never saw it. Emitted as a block-level paragraph it stretched to its
+   * parent's full width — a 211px CTA rendered 500px wide. */
+  if ((kind === 'text' || kind === 'heading')
+      && (d === 'inline-block' || d === 'inline-flex' || d === 'inline')) {
+    raw.push('width:fit-content');
+    if (parentDisplay && parentDisplay.includes('flex')) raw.push('align-self:flex-start');
+  }
+  if (kind === 'container' || kind === 'section') {
     // block/flow-root map to the box default (flex column) — one-directional margin flows survive
     if (isFlex || isGrid) {
       const j = s['justify-content'];
@@ -202,8 +275,12 @@ export function mapStyles(rec) {
     sx.pos = pos;
     // absolute/fixed: pin top+left only (all four + width would overconstrain); sticky: top
     if (pos === 'absolute' || pos === 'fixed') {
-      if (s.top && s.top !== 'auto') raw.push(`top:${s.top}`);
-      if (s.left && s.left !== 'auto') raw.push(`left:${s.left}`);
+      // Pinning both edges of an axis is how `inset-0` full-bleeds; expressing it as inset keeps
+      // the box responsive, where a frozen width/height from the 1440 capture would not be.
+      if (insetBoth) raw.push(`top:${s.top}`, `bottom:${s.bottom}`);
+      else if (s.top && s.top !== 'auto') raw.push(`top:${s.top}`);
+      if (insetBothX) raw.push(`left:${s.left}`, `right:${s.right}`);
+      else if (s.left && s.left !== 'auto') raw.push(`left:${s.left}`);
     } else if (pos === 'sticky' && s.top && s.top !== 'auto') raw.push(`top:${s.top}`);
   }
   if (s['z-index'] && s['z-index'] !== 'auto') sx.z = parseInt(s['z-index'], 10);
@@ -217,11 +294,45 @@ export function mapStyles(rec) {
   const fullW = parentContentW != null && Math.abs(rect.w - parentContentW) <= 1.5;
   const maxwIsTheConstraint = typeof sx.maxw === 'number' && Math.abs(rect.w - sx.maxw) <= 1.5;
   const growing = num(s['flex-grow']) > 0 && parentDisplay && parentDisplay.includes('flex');
-  if (kind !== 'text' && kind !== 'heading' && !isRoot) {
-    if (!fullW && !maxwIsTheConstraint && !parentGrid && !growing) sx.w = r1(rect.w);
+  {
+    // authoredW === null means the width came from content or from the parent — leave it fluid so the
+    // box can hug or fill as the source did, instead of pinning it and forcing a text wrap.
+    // TEXT leaves need this too: a `w-12 h-12 rounded-full` icon button carrying a glyph classifies
+    // as text, and excluding it stretched a 48px round button across 284px of row.
+    const widthIsAuthored = authoredW != null || insetBothX;
+    const textLeaf = kind === 'text' || kind === 'heading';
+    /* `parentGrid` skips width on the assumption a grid child fills its cell — but a 192px round
+     * portrait centred in a wider cell does not, and dropping its width let it stretch into an
+     * ellipse. authoredW is measured proof, so it outranks that heuristic. */
+    if (!fullW && !maxwIsTheConstraint && !growing && widthIsAuthored && !isRoot
+        && (!parentGrid || authoredW != null)
+        && (!textLeaf || authoredW != null)) sx.w = r1(rect.w);
   }
   if (num(s['min-height']) > 0) sx.minh = r1(num(s['min-height']));
   if (num(s['min-width']) > 0) raw.push(`min-width:${s['min-width']}`);
+  /* An authored height (proved by the capture's height:auto probe). Emitted only when the box is
+   * NOT already sized by both inset edges, and only when it differs from any min-height we just
+   * wrote — otherwise the same number lands twice. Without this the box renders at its content
+   * height, which for `inset-0` overlays and `size-N` squares is 0 or half of what it should be. */
+  if (authoredH != null && !insetBoth && !isRoot) {
+    const h = r1(authoredH);
+    if (!(typeof sx.minh === 'number' && Math.abs(sx.minh - h) <= 1)) sx.h = h;
+    /* A TEXT leaf can carry an authored height too — `w-12 h-12 rounded-full flex items-center
+     * justify-content` with a number inside is a circular badge, and classify() calls it text
+     * because its only child is a text node. Excluding text leaves here left it at its content
+     * height (18px instead of 48px), which shifted every following section up 30px. But pinning a
+     * height on text without also carrying the source's flex centering drops the glyph to the top
+     * of the box, so the two have to travel together. */
+    if ((kind === 'text' || kind === 'heading') && (isFlex || isGrid)) {
+      const al = s['align-items'];
+      const ju = s['justify-content'];
+      if ((al && al !== 'normal' && al !== 'stretch') || (ju && ju !== 'normal' && ju !== 'flex-start')) {
+        raw.push(`display:${isGrid ? 'grid' : 'flex'}`);
+        if (al && al !== 'normal' && al !== 'stretch') raw.push(`align-items:${al}`);
+        if (ju && ju !== 'normal' && ju !== 'flex-start') raw.push(`justify-content:${ju}`);
+      }
+    }
+  }
 
   /* ── margins (+ mx-auto centering via rect gaps — computed margins can't tell 'auto') ── */
   const mg = sides(s, (k) => r1(num(s[`margin-${k}`])));
@@ -305,6 +416,17 @@ export function mapStyles(rec) {
     if (fw) sx.weight = fw;
     if (s['line-height'] && s['line-height'] !== 'normal') sx.lh = `${r1(num(s['line-height']))}px`;
     if (s.color) sx.color = cssColor(s.color);
+    /* THEME-CASCADE DEFENCE. Pinning only non-default values leaves a hole: a WordPress theme that
+     * sets `body{letter-spacing:-0.1px}` or `h1..h6{letter-spacing:…}` then leaks in, and because a
+     * rule targeting the heading beats an inherited root value, every unpinned line renders ~1%
+     * narrower and paragraphs re-wrap at different words. So pin letter-spacing ALWAYS — including
+     * when the source says `normal`. Same for text-wrap: themes ship `text-wrap:pretty`, which
+     * silently rebalances a paragraph that already fit. */
+    // Only the `normal` case needs filling — a real value is emitted below as a px STRING, and a
+    // bare `ls` number would be read as em (see the tracking-em-looks-like-px lint rule).
+    const lsv = s['letter-spacing'];
+    if (!lsv || lsv === 'normal') sx.ls = 0;
+    raw.push('text-wrap:wrap');
   } else {
     if (s.color && inheritDiff('color') && !isRoot) sx.color = cssColor(s.color);
     if (isRoot && s.color) sx.color = cssColor(s.color);
@@ -383,6 +505,7 @@ const flatten = (n, map = new Map()) => {
 
 export function buildTree(desktopCap, mobileCap, opts = {}) {
   const notes = opts.notes || new Set();
+  const atomicForms = !!opts.atomicForms;
   const mobileMap = mobileCap ? flatten(mobileCap.tree) : new Map();
   const controls = desktopCap.controls || {};
   const mControls = mobileCap?.controls || controls;
@@ -391,9 +514,11 @@ export function buildTree(desktopCap, mobileCap, opts = {}) {
   const mapAt = (capNode, parentCap, kind, ctrls, isRoot) => mapStyles({
     tag: capNode.tag, kind, s: capNode.styles, c: ctrls[capNode.tag], parent: parentCap,
     rect: capNode.rect, notes, isRoot,
+    authoredH: capNode.authoredH, authoredW: capNode.authoredW,
+    insetBoth: capNode.insetBoth, insetBothX: capNode.insetBothX,
   });
 
-  const build = (capNode, parentCap, depth) => {
+  const build = (capNode, parentCap, depth, ground = null) => {
     if (!capNode || capNode.hidden) { if (capNode) dropped++; return null; }
     if (capNode.tag === 'br') return null;       // a br between block children carries nothing
     const kind = classify(capNode);
@@ -413,7 +538,106 @@ export function buildTree(desktopCap, mobileCap, opts = {}) {
       emitted++;
       return { kind: 'html', html: svg, path: capNode.path };
     }
+    /* A REAL <form> maps onto the atomic e-form element. `form` is normally an HTML carrier, so the
+     * walk never saw its fields and the whole form shipped as inert Tailwind markup — unstyled, and
+     * the largest single fidelity loss on any page with a form. With --atomic-forms the capture
+     * descends, and we collect the field descendants (flattening layout wrappers, whose only job was
+     * flex sizing) into kit builders. e-form's own children must be kit nodes, so layout rides a
+     * wrapper <box> with an `& form{…}` rule — the same technique that reached 99.2% by hand. */
+    if (atomicForms && capNode.tag === 'form') {
+      const fields = [];
+      const collect = (n) => {
+        for (const ch of n.children || []) {
+          if (ch.hidden || ch.tag === '#text' || ch.tag === 'br') continue;
+          const t = ch.tag;
+          if (t === 'input' || t === 'textarea' || t === 'select' || t === 'label' || t === 'button') {
+            fields.push(ch);
+            if (t !== 'label') continue;
+          }
+          if (t === 'label') continue;
+          collect(ch);                       // a wrapper div/span: hoist whatever is inside it
+        }
+      };
+      collect(capNode);
+      const built = [];
+      for (const f of fields) {
+        const attr = (nm) => { const m = new RegExp(`${nm}="([^"]*)"`).exec(f.html || ''); return m ? m[1] : ''; };
+        const textOf = (n) => (n.children || []).map((c) => (c.tag === '#text' ? c.text : textOf(c))).join('').trim();
+        // a field that sat inside a flex-grow wrapper must keep growing once the wrapper is gone
+        const grow = num(f.styles['flex-grow']) > 0;
+        const formW = capNode.rect.w
+          - num(capNode.styles['padding-left']) - num(capNode.styles['padding-right']);
+        const fills = Math.abs(f.rect.w - formW) <= 2;
+        const css = fieldCss(f.styles, {
+          grow: (f.tag === 'input' || f.tag === 'textarea' || f.tag === 'select') && grow,
+          width: f.rect.w, fills,
+        });
+        if (f.tag === 'label') {
+          built.push({ builder: 'formLabel', args: [attr('for') || 'field', textOf(f) || 'Label'], sel: '& label', css });
+        } else if (f.tag === 'button') {
+          built.push({ builder: 'formSubmit', args: [textOf(f) || 'Submit'], sel: '& button', css });
+        } else if (f.tag === 'select') {
+          /* formSelect's SECOND argument is the options array — `[value, label]` pairs, or a bare
+           * string for both. Passing the opts object there made `options.map` throw and killed the
+           * whole build, so parse the real <option> list out of the carrier markup. */
+          const opts = [...(f.html || '').matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/g)].map((m) => {
+            const val = (/value="([^"]*)"/.exec(m[1]) || [])[1] ?? '';
+            const label = m[2].replace(/<[^>]+>/g, '').trim();
+            return val ? [val, label || val] : label;
+          }).filter((o) => (Array.isArray(o) ? o[1] : o));
+          built.push({ builder: 'formSelect',
+            args: [attr('id') || attr('name') || 'field', opts,
+              { required: /\brequired\b/.test(f.html || '') }],
+            sel: '& select', css });
+        } else {
+          const b = f.tag === 'textarea' ? 'formTextarea' : 'formInput';
+          built.push({ builder: b, args: [attr('id') || attr('name') || 'field',
+            { placeholder: attr('placeholder'), type: attr('type') || 'text',
+              required: /\brequired\b/.test(f.html || '') }],
+            sel: `& ${f.tag}`, css });
+        }
+      }
+      if (built.length) {
+        const { sx: wsx, raw: wraw } = mapAt(capNode, parentCap, 'container', controls, false);
+        // the <form> element's own layout, as CSS, since form() takes envelopes not sx
+        const fs = capNode.styles;
+        const decls = [`display:${fs.display}`];
+        if (String(fs.display).includes('flex')) {
+          decls.push(`flex-direction:${fs['flex-direction']}`);
+          if (fs['align-items'] && fs['align-items'] !== 'normal') decls.push(`align-items:${fs['align-items']}`);
+          if (fs['justify-content'] && fs['justify-content'] !== 'normal') decls.push(`justify-content:${fs['justify-content']}`);
+        }
+        const gap = num(fs['row-gap'] === 'normal' ? 0 : fs['row-gap']) || num(fs['column-gap'] === 'normal' ? 0 : fs['column-gap']);
+        if (gap) decls.push(`gap:${r1(gap)}px`);
+        emitted += built.length + 1;
+        notes.add(`<form> mapped to a native e-form with ${built.length} field(s) (Pro required)`);
+        return { kind: 'atomicForm', path: capNode.path, fields: built,
+                 formCss: decls.join(';'), sx: wsx, raw: wraw };
+      }
+      // no recognisable fields — fall through to the carrier path below
+    }
     if (kind === 'html') {
+      /* A bare input/textarea/select HAS a native mapping — the atomic e-form-* widgets, which work
+       * standalone without an enclosing e-form. Opt-in, because those widgets ride the Pro-only
+       * e_pro_atomic_form experiment: emitting them by default would turn a working free-core import
+       * into a deploy that aborts on unregistered types. `exjsx lint` warns via pro-only-element. */
+      const FORMABLE = { input: 'formInput', textarea: 'formTextarea' };  // select needs an options array
+      if (atomicForms && FORMABLE[capNode.tag]) {
+        const attr = (name) => {
+          const m = new RegExp(`${name}="([^"]*)"`).exec(capNode.html || '');
+          return m ? m[1] : '';
+        };
+        const { sx: fsx, raw: fraw } = mapAt(capNode, parentCap, 'container', controls, false);
+        emitted++;
+        notes.add(`<${capNode.tag}> mapped to a native ${FORMABLE[capNode.tag]} (Pro required)`);
+        return {
+          kind: 'formField', builder: FORMABLE[capNode.tag], path: capNode.path,
+          id: attr('id') || attr('name') || 'field',
+          opts: { placeholder: attr('placeholder'), type: attr('type') || 'text',
+                  required: /\brequired\b/.test(capNode.html || '') },
+          sx: fsx, raw: fraw,
+        };
+      }
       notes.add(`<${capNode.tag}> kept as a raw html carrier (no atomic mapping)`);
       emitted++;
       return { kind: 'html', html: capNode.html || '', path: capNode.path };
@@ -439,7 +663,20 @@ export function buildTree(desktopCap, mobileCap, opts = {}) {
 
     const base = { kind, sx, raw: raw.join(';'), mobile, path: capNode.path };
     if (kind === 'text' || kind === 'heading') {
-      const text = textRun(capNode.children || [], notes);
+      /* A <span> whose colour differs from its heading is a highlighted word. Carry exactly one
+       * such colour through as <strong> + a colour rule; more than one and we cannot tell them
+       * apart inside a single whitelisted tag, so leave them flattened rather than mis-colour. */
+      const tinted = [...new Set((capNode.children || [])
+        .filter((ch) => ch.tag === 'span' && ch.styles && ch.styles.color
+          && ch.styles.color !== capNode.styles.color)
+        .map((ch) => ch.styles.color))];
+      const hasRealBold = (capNode.children || []).some((ch) => ['strong', 'b', 'em', 'i'].includes(ch.tag));
+      const recolor = tinted.length === 1 && !hasRealBold ? tinted[0] : null;
+      const text = textRun(capNode.children || [], notes, recolor);
+      if (recolor) {
+        base.raw = `${base.raw ? `${base.raw};` : ''}& strong{color:${cssColor(recolor)};font-weight:inherit}`;
+        notes.add('a coloured inline <span> was carried through as <strong> so its colour survives html-v3');
+      }
       // inline em/strong runs with their own typography (the "$30 <span>/month</span>" pattern):
       // html-v3 keeps the tag; a nested & rule restores its computed size/weight/color.
       const inlineRules = [];
@@ -456,6 +693,41 @@ export function buildTree(desktopCap, mobileCap, opts = {}) {
         if (decls.length) { inlineRules.push(`& ${t}{${decls.join(';')}}`); seenInline.add(t); }
       }
       if (inlineRules.length) base.raw = `${base.raw ? `${base.raw};` : ''}${inlineRules.join('')}`;
+      /* ICON FONT RESCUE. html-v3 whitelists em/strong/br, so any other inline child flattens to its
+       * text. For an icon span (`<span class="material-symbols-outlined">arrow_forward</span>`) that
+       * is catastrophic: the LIGATURE NAME renders as visible body copy. When every element child
+       * shares one font-family that differs from the leaf's, adopt it onto the leaf so the glyph
+       * still resolves. */
+      const elKids = (capNode.children || []).filter((ch) => ch.tag !== '#text' && ch.tag !== 'br' && ch.styles);
+      /* SOLE-CHILD PROMOTION. classify() calls a wrapper whose only child is an inline element a text
+       * block, so the child flattens to text and the WRAPPER's styles win. When that child is the
+       * thing carrying the visual identity — `<div class="absolute"><span class="bg-primary
+       * text-on-primary px-3 uppercase">…</span></div>`, the chip/badge pattern — the result loses its
+       * background, its inverted text colour, its padding and its tracking. Adopt the child's visual
+       * props and keep only the wrapper's POSITION, which is the wrapper's actual job. */
+      const bareText = (capNode.children || [])
+        .filter((ch) => ch.tag === '#text' && ch.text && ch.text.trim()).length;
+      if (elKids.length === 1 && !bareText) {
+        const { sx: kidSx, raw: kidRaw } = mapAt(elKids[0], capNode, 'text', controls, false);
+        const POSITIONAL = new Set(['pos', 'z', 'm', 'w', 'maxw', 'h', 'minh']);
+        const merged = { ...base.sx };
+        for (const [k, v] of Object.entries(kidSx)) if (!POSITIONAL.has(k)) merged[k] = v;
+        base.sx = merged;
+        // the wrapper's own raw is positioning (top/left/…); the child's is text-transform etc.
+        const kidExtra = kidRaw.filter((d) => !/^(?:top|bottom|left|right|position)\s*:/.test(d));
+        if (kidExtra.length) base.raw = `${base.raw ? `${base.raw};` : ''}${kidExtra.join(';')}`;
+        notes.add(`sole inline <${elKids[0].tag}> child's styling promoted onto its <${capNode.tag}> `
+          + '(the wrapper only positions it)');
+      } else if (elKids.length) {
+        const fams = new Set(elKids.map((ch) => ch.styles['font-family']));
+        const own = capNode.styles['font-family'];
+        if (fams.size === 1 && [...fams][0] && [...fams][0] !== own) {
+          base.sx = { ...base.sx, font: String([...fams][0]).split(',')[0].trim().replace(/^["']|["']$/g, '') };
+          const fs = elKids[0].styles['font-size'];
+          if (fs) base.sx.size = r1(num(fs));
+          notes.add(`inline <${elKids[0].tag}> icon font "${base.sx.font}" promoted onto its <${capNode.tag}>`);
+        }
+      }
       emitted++;
       const out = { ...base, text };
       if (kind === 'heading') out.tag = capNode.tag;
@@ -480,15 +752,185 @@ export function buildTree(desktopCap, mobileCap, opts = {}) {
         children.push({ kind: 'text', sx: keep, raw: '', mobile: null, text: t, path: `${capNode.path}#t` });
         emitted++;
       } else {
-        const built = build(ch, capNode, depth + 1);
+        const ownBg = capNode.styles && !isTransparent(capNode.styles['background-color'])
+          ? cssColor(capNode.styles['background-color']) : null;
+        const built = build(ch, capNode, depth + 1, ownBg || ground);
         if (built) children.push(built);
       }
+    }
+    /* EMPTY ABSOLUTE OVERLAY → a background layer on this container.
+     * Stitch (and Tailwind generally) draws tints, gradients and hairline rules as an empty
+     * absolutely-positioned div stacked over the parent. assertTree rejects those outright — an
+     * empty overlay swallows clicks in the Elementor editor — so the build used to fail and a human
+     * had to collapse each one by hand. Fold the child's paint into this element's background
+     * instead: same pixels, one fewer element, and nothing unclickable. */
+    /* PAINT-ONLY CHILDREN → the parent's background layers.
+     * Stitch draws tints, gradients, images and hairline rules as childless divs stacked inside a
+     * relative box, and assertTree rejects an EMPTY ABSOLUTE one outright (it swallows editor
+     * clicks). Folding just the absolute one into the parent is wrong: an absolute overlay paints
+     * ABOVE its in-flow siblings, while a parent background paints BELOW them — that inverted the
+     * hero (gradient ended up under the photo). So fold EVERY paint-only child together, in reverse
+     * document order, because the first CSS layer is the topmost. That empties the container and
+     * preserves the stacking. Bail entirely unless all children are paint-only — a partial fold is
+     * how you get silently wrong pixels. */
+    const paintOf = (ch) => {
+      if (ch.kind !== 'container' || (ch.children || []).length) return null;
+      const url = ch.sx?.bgImage;
+      const fromRaw = (/background-image\s*:\s*([^;]+)/.exec(ch.raw || '') || [])[1];
+      if (url) return `url('${url}')`;
+      if (fromRaw) return fromRaw;
+      if (ch.sx?.bg) return `linear-gradient(${ch.sx.bg}, ${ch.sx.bg})`;
+      if (borderSidesOf(ch).length) return 'BORDERS';   // decorative rules/corner brackets
+      return null;
+    };
+    /* Each drawn border side of an empty absolute box, as a line we can reproduce as a background
+     * layer. `border-top:2px solid X` on a 48x48 box is a 48x2 line at the box's top edge. */
+    const borderSidesOf = (ch) => {
+      const out = [];
+      for (const side of ['top', 'right', 'bottom', 'left']) {
+        const m = new RegExp(`border-${side}\\s*:\\s*([\\d.]+)px\\s+\\w+\\s+([^;]+)`).exec(ch.raw || '');
+        if (m) out.push({ side, w: parseFloat(m[1]), color: m[2].trim() });
+      }
+      if (!out.length && Array.isArray(ch.sx?.border) && ch.sx.border.length === 2) {
+        for (const side of ['top', 'right', 'bottom', 'left']) out.push({ side, w: ch.sx.border[0], color: ch.sx.border[1] });
+      }
+      return out;
+    };
+    /** child paint → background layers (an array: a border box needs one layer per drawn side). */
+    const layersFor = (ch, cr) => {
+      const paint = paintOf(ch);
+      if (!paint) return null;
+      if (paint !== 'BORDERS') {
+        return [{ paint, size: `${r1(cr.w)}px ${r1(cr.h)}px`, pos: `${r1(cr.x)}px ${r1(cr.y)}px` }];
+      }
+      return borderSidesOf(ch).map(({ side, w, color }) => {
+        const horiz = side === 'top' || side === 'bottom';
+        const size = horiz ? `${r1(cr.w)}px ${r1(w)}px` : `${r1(w)}px ${r1(cr.h)}px`;
+        const x = side === 'right' ? r1(cr.x + cr.w - w) : r1(cr.x);
+        const y = side === 'bottom' ? r1(cr.y + cr.h - w) : r1(cr.y);
+        return { paint: `linear-gradient(${color}, ${color})`, size, pos: `${x}px ${y}px` };
+      });
+    };
+    const hasAbsOverlay = children.some((c) => c.kind === 'container' && !(c.children || []).length
+      && c.sx?.pos === 'absolute' && paintOf(c));
+    if (hasAbsOverlay && children.length && children.every((c) => paintOf(c))) {
+      const layers = [];
+      for (let i = children.length - 1; i >= 0; i--) {
+        const ch = children[i];
+        const cr = capChildRect(capNode, ch.path);
+        if (!cr) { layers.length = 0; break; }
+        const own = layersFor(ch, cr);
+        if (!own) { layers.length = 0; break; }
+        layers.push(...own);
+        /* Element opacity cannot be expressed per background layer. When a faded image sits over a
+         * known ground colour, an equivalent veil layer reproduces it exactly:
+         * image at alpha A over ground == ground at (1-A) painted over the image. */
+        const op = (/(?:^|;)\s*opacity\s*:\s*([\d.]+)/.exec(ch.raw || '') || [])[1];
+        if (op && Number(op) < 1) {
+          const g = ground || (capNode.styles && !isTransparent(capNode.styles['background-color'])
+            ? cssColor(capNode.styles['background-color']) : null);
+          if (!g) { layers.length = 0; break; }        // unknown ground → refuse to guess
+          const veil = veilOver(g, 1 - Number(op));
+          layers.splice(layers.length - own.length, 0, { paint: `linear-gradient(${veil}, ${veil})`,
+            size: `${r1(cr.w)}px ${r1(cr.h)}px`, pos: `${r1(cr.x)}px ${r1(cr.y)}px` });
+        }
+      }
+      if (layers.length) {
+        const add = `background-image:${layers.map((l) => l.paint).join(', ')};`
+          + `background-size:${layers.map((l) => l.size).join(', ')};`
+          + `background-position:${layers.map((l) => l.pos).join(', ')};background-repeat:no-repeat`;
+        base.raw = base.raw ? `${base.raw};${add}` : add;
+        emitted -= children.length;
+        notes.add(`${children.length} paint-only child(ren) folded into the parent background `
+          + '(assertTree forbids unclickable empty absolute overlays)');
+        children.length = 0;
+      }
+    } else if (hasAbsOverlay) {
+      /* Mixed children. An absolute overlay still folds safely when its z-index puts it BEHIND every
+       * non-paint sibling — then a parent background (which paints below all children) is exactly
+       * where it already rendered. Strict `<` because at equal/auto z-index a positioned element
+       * paints above a static one, so "equal" is not safe. This is the case the first pass created:
+       * folding a wrapper's children empties the wrapper, and the wrapper then needs folding too. */
+      const zOf = (c) => (typeof c.sx?.z === 'number' ? c.sx.z : 0);
+      const others = children.filter((c) => !paintOf(c));
+      const minOtherZ = others.length ? Math.min(...others.map(zOf)) : 0;
+      for (let i = children.length - 1; i >= 0; i--) {
+        const ch = children[i];
+        if (!paintOf(ch) || ch.sx?.pos !== 'absolute') continue;
+        const cr = capChildRect(capNode, ch.path);
+        if (!cr) continue;
+        // full-bleed == a background by intent, even with no z-index to prove it sits behind
+        const coversParent = Math.abs(cr.x) <= 2 && Math.abs(cr.y) <= 2
+          && Math.abs(cr.w - capNode.rect.w) <= 2 && Math.abs(cr.h - capNode.rect.h) <= 2;
+        const escapesBox = cr.x < -1 || cr.y < -1
+          || cr.x + cr.w > capNode.rect.w + 1 || cr.y + cr.h > capNode.rect.h + 1;
+        if (escapesBox) continue;                       // background layers clip; folding would crop it
+        // full-bleed, or lower z, or simply a paint-only box inside the parent → it is a background
+        if (!coversParent && zOf(ch) > minOtherZ) continue;
+        const own = layersFor(ch, cr);
+        if (!own) continue;
+        const extra = `background-image:${own.map((l) => l.paint).join(', ')};`
+          + `background-size:${own.map((l) => l.size).join(', ')};`
+          + `background-position:${own.map((l) => l.pos).join(', ')};background-repeat:no-repeat`;
+        /* Only BACKGROUND-safe declarations may travel. filter/backdrop-filter/transform/opacity/
+         * mix-blend-mode apply to the whole element — hoisting `filter:blur(64px)` off a decorative
+         * glow blurred the entire section and erased the photograph sitting in it. Drop them and say
+         * so, rather than silently wrecking the parent. */
+        const dropped = [];
+        // when the paint came FROM the borders they are now background layers; leaving the border
+        // declarations in would draw them around the whole parent instead of at the overlay's box
+        const borderBecameLayers = paintOf(ch) === 'BORDERS';
+        const keptDecls = (ch.raw || '').split(';').map((x) => x.trim()).filter(Boolean)
+          .filter((decl) => {
+            if (borderBecameLayers && /^border(-top|-right|-bottom|-left)?\s*:/.test(decl)) return false;
+            if (/^(?:top|bottom|left|right|background-image|background-size|background-position|background-repeat)\s*:/.test(decl)) return false;
+            if (/^(?:filter|backdrop-filter|transform|opacity|mix-blend-mode)\s*:/.test(decl)) {
+              dropped.push(decl.split(':')[0]); return false;
+            }
+            return true;
+          }).join(';');
+        base.raw = [base.raw, extra, keptDecls].filter(Boolean).join(';');
+        children.splice(i, 1);
+        emitted--;
+        notes.add('absolute overlay folded into its parent background (it rendered behind its siblings)');
+        if (dropped.length) notes.add(`overlay ${[...new Set(dropped)].join('/')} dropped — it would apply to the whole parent, not just the folded layer`);
+      }
+    }
+    for (let i = children.length - 1; i >= 0; i--) {
+      const ch = children[i];
+      if (ch.kind !== 'container' || (ch.children || []).length) continue;
+      if (ch.sx?.pos !== 'absolute') continue;
+      const what = paintOf(ch) === 'BORDERS' ? 'border decoration'
+        : paintOf(ch) ? 'background overlay' : 'empty positioned box';
+      const cr = capChildRect(capNode, ch.path);
+      const why = !paintOf(ch) ? 'it paints nothing'
+        : !cr ? 'its geometry could not be resolved'
+        : (cr.x < -1 || cr.y < -1 || cr.x + cr.w > capNode.rect.w + 1 || cr.y + cr.h > capNode.rect.h + 1)
+          ? 'it extends outside its parent, so a background layer would clip it'
+          : 'it paints above its siblings and folding would change the stacking';
+      children.splice(i, 1);
+      emitted--;
+      notes.add(`dropped an un-foldable absolute ${what} — ${why} `
+        + '(assertTree forbids empty absolute containers)');
     }
     emitted++;
     const out = { ...base, children };
     if (capNode.href) out.href = capNode.href;
     return out;
   };
+
+  /** rect of a built child relative to its parent's padding box, found by capture path. */
+  function capChildRect(parentCapNode, childPath) {
+    const find = (n) => {
+      if (!n || typeof n !== 'object') return null;
+      if (n.path === childPath) return n;
+      for (const k of n.children || []) { const r = find(k); if (r) return r; }
+      return null;
+    };
+    const c = find(parentCapNode);
+    if (!c || !c.rect || !parentCapNode.rect) return null;
+    return { x: c.rect.x - parentCapNode.rect.x, y: c.rect.y - parentCapNode.rect.y, w: c.rect.w, h: c.rect.h };
+  }
 
   const root = build(desktopCap.tree, null, 0);
   if (root) root.isRoot = true;
@@ -564,6 +1006,32 @@ export function emitNode(n, indent = 1) {
   const pad = '  '.repeat(indent);
   const o = propsOf(n);
   if (n.kind === 'html') return `${pad}<html raw={${JSON.stringify(n.html)}} />`;
+  if (n.kind === 'atomicForm') {
+    const args = n.fields.map((f) => `      ${f.builder}(${f.args.map((a) => JSON.stringify(a)).join(', ')})`).join(',\n');
+    const seen = new Set();
+    const fieldRules = n.fields
+      .filter((f) => f.sel && f.css && !seen.has(f.sel) && seen.add(f.sel))
+      .map((f) => `${f.sel}{${f.css}}`);
+    const rawAll = [...(n.raw || []), `& form{${n.formCss}}`, ...fieldRules].filter(Boolean).join(';');
+    const attrs = Object.entries(n.sx || {}).map(([k, v]) => `${k}={${JSON.stringify(v)}}`).join(' ');
+    return `${pad}<box ${attrs} raw={${JSON.stringify(rawAll)}}>\n`
+      + `${pad}  {form({ name: "imported-form", actions: ["email"], messages: false }, [\n${args},\n${pad}  ])}\n`
+      + `${pad}</box>`;
+  }
+  if (n.kind === 'formField') {
+    /* The kit's form builders take PROP ENVELOPES (SZ()/P0) as their third argument, not sx
+     * shorthand — passing sx there silently no-ops and the field renders at its default size.
+     * So the geometry goes on a wrapper box, which the normal intrinsic path compiles properly,
+     * and the control is told to fill it and inherit its typography. */
+    const o = JSON.stringify(n.opts);
+    const call = `{${n.builder}(${JSON.stringify(n.id)}, ${o})}`;
+    const sx = { ...(n.sx || {}) };
+    const fill = 'width:100%;height:100%;background:transparent;border:0;'
+      + 'font-family:inherit;font-size:inherit;letter-spacing:inherit;color:inherit';
+    const rawAll = [...(n.raw || []), `& input,& textarea,& select{${fill}}`].join(';');
+    const attrs = Object.entries(sx).map(([k, v]) => `${k}={${JSON.stringify(v)}}`).join(' ');
+    return `${pad}<box ${attrs} raw={${JSON.stringify(rawAll)}}>\n${pad}  ${call}\n${pad}</box>`;
+  }
   if (n.kind === 'img') return `${pad}${openTag('img', o, true)}`;
   if (n.kind === 'text' || n.kind === 'heading') {
     const name = n.kind === 'text' ? 'text' : (o.tag ? 'heading' : n.tag);
@@ -573,6 +1041,41 @@ export function emitNode(n, indent = 1) {
   if (!n.children || !n.children.length) return `${pad}${openTag(name, o, false)}</${name}>`;
   const kids = n.children.map((c) => emitNode(c, indent + 1)).join('\n');
   return `${pad}${openTag(name, o, false)}\n${kids}\n${pad}</${name}>`;
+}
+
+/* Google families actually used, with the weights actually used. The capture reads computed styles
+ * but not the document's <link> tags, so an imported page previously fell back to a system stack in
+ * WordPress and every glyph metric shifted. Collect from the emit tree and inject loaders. */
+export function collectFonts(root) {
+  const fonts = new Map();
+  const first = (fam) => String(fam).split(',')[0].trim().replace(/^["']|["']$/g, '');
+  const GENERIC = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui',
+    'ui-sans-serif', 'ui-serif', 'ui-monospace', 'inherit', 'initial', '-apple-system']);
+  const walk = (n) => {
+    if (!n || typeof n !== 'object') return;
+    const fam = n.sx?.font;
+    if (fam) {
+      const f = first(fam);
+      if (f && !GENERIC.has(f.toLowerCase())) {
+        if (!fonts.has(f)) fonts.set(f, new Set());
+        // a weight seen anywhere under this family; 400 always, so body copy never faux-bolds
+        fonts.get(f).add(400);
+      }
+    }
+    if (n.sx?.weight && fam) fonts.get(first(fam))?.add(Number(n.sx.weight));
+    for (const k of n.children || []) walk(k);
+  };
+  walk(root);
+  // a weight used under a family declared on an ANCESTOR still needs loading — sweep again with
+  // the nearest declared family in scope
+  const sweep = (n, inherited) => {
+    if (!n || typeof n !== 'object') return;
+    const fam = n.sx?.font ? first(n.sx.font) : inherited;
+    if (fam && fonts.has(fam) && n.sx?.weight) fonts.get(fam).add(Number(n.sx.weight));
+    for (const k of n.children || []) sweep(k, fam);
+  };
+  sweep(root, null);
+  return [...fonts.entries()].map(([family, w]) => ({ family, weights: [...w].sort((a, b) => a - b) }));
 }
 
 export function emitPageJsx(root, { title = 'Imported page', source = '?', notes = new Set() } = {}) {
@@ -585,16 +1088,33 @@ export function emitPageJsx(root, { title = 'Imported page', source = '?', notes
   lines.push(`export const meta = { title: ${JSON.stringify(title)}, template: 'elementor_canvas' };`);
   lines.push('');
   lines.push('export default () => (');
-  lines.push(emitNode(root, 1));
+  const body = emitNode(root, 1);
+  const fonts = collectFonts(root);
+  if (fonts.length) {
+    // Inject the loaders as the root's FIRST children (they render nothing). Two shapes to handle:
+    // a root with children spans several lines, but a childless root emits as one `<box …></box>`
+    // line — inserting after "the first newline" silently dropped the loaders in that case.
+    const loaders = fonts.map((f) => (/^material symbols/i.test(f.family)
+      // variable-axis family: fontLoader emits :wght@400;700, which returns no glyphs for it
+      ? `    <html raw={${JSON.stringify(`<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${f.family.replace(/ /g, '+')}:wght,FILL@100..700,0..1&display=swap">`)}} />`
+      : `    {fontLoader(${JSON.stringify(f.family)}, [${f.weights.join(', ')}])}`));
+    const nl = body.indexOf('\n');
+    if (nl !== -1) {
+      lines.push(body.slice(0, nl + 1) + loaders.join('\n') + body.slice(nl));
+    } else {
+      const m = /^(\s*)(<[a-zA-Z][^>]*>)(.*)(<\/[a-zA-Z][^>]*>)\s*$/.exec(body);
+      lines.push(m ? `${m[1]}${m[2]}\n${loaders.join('\n')}\n${m[1]}${m[3]}${m[4]}` : body);
+    }
+  } else lines.push(body);
   lines.push(');');
   lines.push('');
   return lines.join('\n');
 }
 
 /** captures → finished .page.jsx source (pure — unit-testable without a browser). */
-export function pageFromCaptures(desktopCap, mobileCap, { title, source } = {}) {
+export function pageFromCaptures(desktopCap, mobileCap, { title, source, atomicForms = false } = {}) {
   const notes = new Set();
-  const { root, stats } = buildTree(desktopCap, mobileCap, { notes });
+  const { root, stats } = buildTree(desktopCap, mobileCap, { notes, atomicForms });
   if (!root) throw new Error('exjsx import: nothing visible captured from the source');
   const collapsed = collapseTree(root);
   collapsed.isRoot = true;
@@ -612,9 +1132,12 @@ async function resolvePlaywright() {
 }
 
 /* runs INSIDE the page — must be fully self-contained (playwright serializes it). */
-function capturePage({ props }) {
+function capturePage({ props, descendForms = false }) {
   const SKIP = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'NOSCRIPT', 'TEMPLATE', 'TITLE', 'HEAD', 'SOURCE', 'TRACK']);
   const CARRIER = new Set(['IFRAME', 'VIDEO', 'CANVAS', 'FORM', 'INPUT', 'SELECT', 'TEXTAREA', 'AUDIO', 'TABLE']);
+  // <form> is a carrier by default, which means the walk never reaches its fields. When we intend to
+  // map those fields onto atomic e-form widgets we must descend instead.
+  if (descendForms) CARRIER.delete('FORM');
   // per-tag control elements in a bare same-UA iframe → UA-default styles without page CSS
   const ifr = document.createElement('iframe');
   ifr.style.cssText = 'position:absolute;left:-99999px;top:0;width:500px;height:500px;visibility:hidden';
@@ -632,6 +1155,28 @@ function capturePage({ props }) {
     return controls[tag];
   };
   const readStyles = (cs) => { const o = {}; for (const pr of props) o[pr] = cs.getPropertyValue(pr); return o; };
+  const sizingRules = { width: [], height: [] };
+  for (const sheet of document.styleSheets) {
+    let rules; try { rules = sheet.cssRules; } catch { continue; }
+    const visit = (list) => {
+      for (const rule of list) {
+        if (rule.cssRules) { visit(rule.cssRules); continue; }   // @media/@supports
+        if (!rule.selectorText || !rule.style) continue;
+        for (const axis of ['width', 'height']) {
+          const v = rule.style.getPropertyValue(axis);
+          if (v && v !== 'auto') sizingRules[axis].push(rule.selectorText);
+        }
+      }
+    };
+    try { visit(rules); } catch { /* cross-origin */ }
+  }
+  const declaresSize = (el, axis) => {
+    if (el.style && el.style.getPropertyValue(axis)) return true;
+    for (const sel of sizingRules[axis]) {
+      try { if (el.matches(sel)) return true; } catch { /* :hover etc */ }
+    }
+    return false;
+  };
   const walk = (el, path) => {
     if (SKIP.has(el.tagName)) return null;
     const tag = el.tagName.toLowerCase();
@@ -647,6 +1192,107 @@ function capturePage({ props }) {
       return { tag: 'svg', path, styles: readStyles(cs), rect, svg: el.outerHTML };
     }
     const n = { tag, path, styles: readStyles(cs), rect, children: [] };
+    /* AUTHORED-HEIGHT PROBE. Computed styles cannot distinguish an authored height from a
+     * content-driven one, so heights were previously never emitted — which silently destroyed
+     * Tailwind's `absolute inset-0` (height 0, invisible) and `size-N` squares (collapsed to
+     * their content). Setting height:auto and re-measuring answers the question definitively.
+     * Restricted to the shapes that actually break, so a flex-stretched child (whose auto height
+     * legitimately differs) never gets a hard height pinned onto it:
+     *   a) absolutely/fixed positioned, b) no element children, c) square, d) only absolute kids. */
+    /* IMG is probed too. An `h-[600px] w-full object-cover` photograph has an AUTHORED height and no
+     * aspect-ratio to recover it from, so excluding images meant every full-bleed photo rendered at
+     * whatever height its intrinsic ratio produced — the dominant error on image-led layouts. */
+    if (!CARRIER.has(el.tagName) && r.height > 1.5) {
+      /* Probe unless the height could LEGITIMATELY come from stretch, which is the only case where
+       * pinning it would be wrong. Height-stretch requires a flex-ROW or grid parent (on a flex
+       * COLUMN parent the cross axis is horizontal, so stretch sets width, not height). A narrower
+       * allow-list missed the commonest real case: a flex row with an authored bar height (`h-20`
+       * on a nav), which has children and is not square, so it rendered at 42px instead of 80px. */
+      const pcs = el.parentElement ? getComputedStyle(el.parentElement) : null;
+      const parentStretchesHeight = !!pcs
+        && (pcs.display.includes('grid')
+            || (pcs.display.includes('flex') && pcs.flexDirection.startsWith('row')));
+      const selfAlign = cs.alignSelf === 'auto' || cs.alignSelf === 'normal'
+        ? (pcs ? pcs.alignItems : 'normal') : cs.alignSelf;
+      /* Stretch is per-AXIS. A flex-ROW parent stretches its children's HEIGHT; a flex-COLUMN parent
+       * stretches their WIDTH. Gating the whole probe on the height case skipped the width probe too,
+       * so a `w-12 h-12` icon button inside a flex row lost both its size and (because the block also
+       * carried the inset probes) everything else — it rendered 284x26 instead of 48x48. */
+      const parentStretchesWidth = !!pcs
+        && (pcs.display.includes('grid')
+            || (pcs.display.includes('flex') && pcs.flexDirection.startsWith('column')));
+      const stretchy = selfAlign === 'stretch' || selfAlign === 'normal';
+      const heightCouldStretch = parentStretchesHeight && stretchy;
+      const widthCouldStretch = parentStretchesWidth && stretchy;
+      {
+        /* Neutralise stretch while measuring. With align-items:stretch a sibling of the same size
+         * makes height:auto produce the SAME number, masking a genuinely authored height — two 48px
+         * icon buttons in a row hid each other's `h-12` and rendered 26px tall. Pinning
+         * align-self:flex-start for the probe removes that masking. */
+        const prev = el.style.getPropertyValue('height');
+        const prevPri = el.style.getPropertyPriority('height');
+        const prevAS = el.style.getPropertyValue('align-self');
+        const prevASp = el.style.getPropertyPriority('align-self');
+        el.style.setProperty('align-self', 'flex-start', 'important');
+        el.style.setProperty('height', 'auto', 'important');
+        const replacedH = el.tagName === 'IMG' || el.tagName === 'VIDEO' || el.tagName === 'CANVAS';
+        const pw0 = el.style.getPropertyValue('width'); const pw0p = el.style.getPropertyPriority('width');
+        if (replacedH) el.style.setProperty('width', 'auto', 'important');
+        const autoH = el.getBoundingClientRect().height;
+        if (replacedH) { if (pw0) el.style.setProperty('width', pw0, pw0p); else el.style.removeProperty('width'); }
+        if (prev) el.style.setProperty('height', prev, prevPri); else el.style.removeProperty('height');
+        if (prevAS) el.style.setProperty('align-self', prevAS, prevASp); else el.style.removeProperty('align-self');
+        if (declaresSize(el, 'height') || Math.abs(autoH - r.height) > 0.5) n.authoredH = r.height;
+        {
+          /* A REPLACED element (img) has an intrinsic aspect ratio, so constraining one axis fixes the
+           * other: width:auto on a `w-48 h-48` square photo still measures 48 because the height holds
+           * it there. The probe saw no change, dropped the width, and a round portrait rendered as a
+           * wide ellipse. Neutralise BOTH axes for replaced elements so the intrinsic size shows. */
+          const replaced = el.tagName === 'IMG' || el.tagName === 'VIDEO' || el.tagName === 'CANVAS';
+          const pw = el.style.getPropertyValue('width'); const pwp = el.style.getPropertyPriority('width');
+          const ph = el.style.getPropertyValue('height'); const php = el.style.getPropertyPriority('height');
+          el.style.setProperty('width', 'auto', 'important');
+          if (replaced) el.style.setProperty('height', 'auto', 'important');
+          const autoW = el.getBoundingClientRect().width;
+          if (pw) el.style.setProperty('width', pw, pwp); else el.style.removeProperty('width');
+          if (replaced) { if (ph) el.style.setProperty('height', ph, php); else el.style.removeProperty('height'); }
+          if (declaresSize(el, 'width') || Math.abs(autoW - r.width) > 0.5) n.authoredW = r.width;
+          /* A SQUARE box with a proven authored height was authored on both axes — `w-48 h-48`,
+           * `size-12`. The width probe alone misses these whenever the cascade already shrink-wraps
+           * the box (a flex column with align-items:center), and the consequence is severe: a round
+           * portrait keeps its radius, loses its width and renders as a wide ellipse. */
+          if (n.authoredW == null && n.authoredH != null && Math.abs(r.width - r.height) <= 1) {
+            n.authoredW = r.width;
+          }
+          /* A ROUND box that renders square is a circle — an avatar, an icon chip — and both axes are
+           * authored by definition. Layout probing cannot prove it when the child is `w-full h-full`
+           * (the parent's size depends on the child and vice versa), and Tailwind's CDN rules are not
+           * reachable through CSSOM, so neither earlier signal fires. Losing the width here is very
+           * visible: the radius survives and a round portrait renders as a wide ellipse. */
+          const radius = parseFloat(cs.borderTopLeftRadius) || 0;
+          const roundish = /%$/.test(cs.borderTopLeftRadius) || radius >= Math.min(r.width, r.height) / 2 - 1;
+          if (Math.abs(r.width - r.height) <= 1 && roundish && r.width > 8) {
+            n.authoredW = r.width; n.authoredH = r.height;
+          }
+        }
+        /* inset-0 detection MUST be probed, not read. For a positioned element the browser RESOLVES
+         * `bottom`/`right` to a used pixel value even when the author never set them — a `fixed top-0`
+         * header reports bottom:819px. Trusting that pinned both edges and stretched the nav to
+         * viewport-minus-819 = 181px instead of 81px. Force the edge to auto: only an AUTHORED edge
+         * changes the box when removed. */
+        if (cs.position === 'absolute' || cs.position === 'fixed') {
+          const probeEdge = (prop) => {
+            const pv = el.style.getPropertyValue(prop); const pp = el.style.getPropertyPriority(prop);
+            el.style.setProperty(prop, 'auto', 'important');
+            const rr = el.getBoundingClientRect();
+            if (pv) el.style.setProperty(prop, pv, pp); else el.style.removeProperty(prop);
+            return rr;
+          };
+          if (cs.top !== 'auto' && Math.abs(probeEdge('bottom').height - r.height) > 0.5) n.insetBoth = true;
+          if (cs.left !== 'auto' && Math.abs(probeEdge('right').width - r.width) > 0.5) n.insetBothX = true;
+        }
+      }
+    }
     if (CARRIER.has(el.tagName)) { n.html = el.outerHTML; return n; }
     if (el.tagName === 'A' && el.getAttribute('href')) n.href = el.getAttribute('href');
     if (el.tagName === 'IMG') { n.src = el.currentSrc || el.src; n.alt = el.getAttribute('alt') || ''; return n; }
@@ -669,7 +1315,7 @@ function capturePage({ props }) {
 }
 
 /** Render the source at the given widths and capture computed-style trees. */
-export async function captureSource(source, { widths = [1440, 390] } = {}) {
+export async function captureSource(source, { widths = [1440, 390], atomicForms = false } = {}) {
   const url = /^https?:\/\//.test(source) ? source : pathToFileURL(resolve(source)).href;
   const pw = await resolvePlaywright();
   const browser = await pw.chromium.launch();
@@ -681,7 +1327,7 @@ export async function captureSource(source, { widths = [1440, 390] } = {}) {
       // deterministic capture: freeze animations/transitions (entrance keyframes, tickers)
       await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' });
       await page.waitForTimeout(300);
-      caps[w] = await page.evaluate(capturePage, { props: PROPS });
+      caps[w] = await page.evaluate(capturePage, { props: PROPS, descendForms: atomicForms });
       await page.close();
     }
     return caps;
@@ -689,13 +1335,13 @@ export async function captureSource(source, { widths = [1440, 390] } = {}) {
 }
 
 /** The CLI verb: capture at 1440+390, map, emit, write. */
-export async function importPage(source, { out, name } = {}) {
+export async function importPage(source, { out, name, atomicForms = false } = {}) {
   if (!out) throw new Error('exjsx import: --out <file>.page.jsx is required');
-  const caps = await captureSource(source);
+  const caps = await captureSource(source, { atomicForms });
   const base = (name || String(out).split('/').pop().replace(/\.page\.jsx$/, '').replace(/\.jsx$/, ''))
     .replace(/[^a-z0-9-]+/gi, '-').toLowerCase();
   const title = caps[1440].title || base.replace(/-/g, ' ').replace(/(^|\s)\w/g, (m) => m.toUpperCase());
-  const { jsx, stats, notes } = pageFromCaptures(caps[1440], caps[390], { title, source });
+  const { jsx, stats, notes } = pageFromCaptures(caps[1440], caps[390], { title, source, atomicForms });
   writeFileSync(resolve(out), jsx);
   return { out: resolve(out), stats, notes: [...notes], title };
 }

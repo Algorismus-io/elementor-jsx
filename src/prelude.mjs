@@ -21,7 +21,8 @@ export {
   archConcave, dyn, loopGrid, form, field, formInput, formTextarea, formSelect, formCheckbox,
   formLabel, formSubmit, formSuccessMessage, formErrorMessage, checkboxRow, EMAIL_ACTION, faIcon, svgIcon, iconChip, eyebrow, accentHeading,
   sectionHeader, section, card, bento, cardGrid, stat, step, chip, logoStrip, testimonial,
-  footer, ctaBand, navBar, browserMock, barChart, lineChart, donut, chatMock
+  footer, ctaBand, navBar, browserMock, barChart, lineChart, donut, chatMock,
+  skipLink, srOnly, focusRing, keyboardScrollable
 } from './x.mjs';
 
 // the JSX component library (esbuild context only — .jsx can't load under bare node)

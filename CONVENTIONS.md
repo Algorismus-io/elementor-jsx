@@ -146,8 +146,17 @@ guard — native Elementor ignores it); opt out only with a reason.
 
 ## 9. Deploy discipline
 
-- Shared/multi-site targets: **always `--inline`** — zero kit writes, no registry or variable
-  clobber. Single-owned sites: normal deploys own the class registry namespace.
+- Many projects on ONE site (an agent building page after page): normal deploys MERGE — every
+  resident class is preserved and ids are content-addressed, so sibling pages cannot clobber each
+  other (2.2.0). Elementor caps the registry at 1000 classes; when a deploy would not fit, it
+  prunes residents that no document uses (trashed/deleted pages leave theirs behind) before
+  writing — `--prune-unused` does the same on demand. Do NOT reach for `--inline` at the cap
+  unless the prune could not make room; if you do, inline pages keep their tablet/mobile
+  variants (Elementor renders breakpoint CSS for local styles — verified 4.2.4), so the only
+  things lost are the shared design system and Class Manager editing.
+- Shared/multi-site targets (one kit serving many sites): `--inline` — zero kit writes, no
+  registry or variable clobber. `--own-classes` replaces the whole store and is for a site you
+  intend to fully re-own.
 - Iterating one page of a big site: `deploy --only <slug>` (kit writes skipped — shared-class
   changes lag until a full deploy; the CLI warns).
 - A drift warning (`skipped-drifted`) means a human edited the page in Elementor. **Stop.**
