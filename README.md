@@ -85,6 +85,7 @@ npx exjsx build mysite/                    # fs-project: pages/ + parts/ + theme
 npx exjsx deploy site.bundle.json    # 2 kit writes + N page upserts (idempotent)
 npx exjsx watch site.jsx --deploy   # rebuild+deploy on save
 npx exjsx build site.jsx --inline   # self-contained pages (multi-tenant kits)
+npx exjsx deploy site.bundle.json --prune-unused  # drop registry classes no document uses (auto at the 1000 cap)
 npx exjsx decompile tree.json        # adopt an existing Elementor page into JSX
 npx exjsx lint site.jsx --strict     # conventions check (CONVENTIONS.md) — CI gate
 npx exjsx inspect site.bundle.json   # readable bundle dump (custom_css decoded)

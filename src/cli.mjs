@@ -74,6 +74,7 @@ async function build(entry) {
     const force = process.argv.includes('--force');
     const fast = process.argv.includes('--fast');
     const ownClasses = process.argv.includes('--own-classes');
+    const pruneUnused = process.argv.includes('--prune-unused');
     // escape hatch for the capability gate (deploy.mjs step 0b) — deploy anyway and let the site 422
     const allowUnregistered = process.argv.includes('--allow-unregistered');
     // --only=a,b OR --only a,b (value = next token, must exist and not be a flag)
@@ -89,7 +90,7 @@ async function build(entry) {
       }
     }
     const bundle = JSON.parse(readFileSync(resolve(arg), 'utf8'));
-    const r = await deployBundle(bundle, { dry, force, only, fast, ownClasses, allowUnregistered });
+    const r = await deployBundle(bundle, { dry, force, only, fast, ownClasses, pruneUnused, allowUnregistered });
     // --only warnings (class-registry lag) surface in BOTH dry and real mode, on stderr
     for (const w of r.warnings || []) console.error(`WARN: ${w}`);
     if (dry) {
@@ -111,6 +112,8 @@ async function build(entry) {
       if (r.componentsExpanded) console.log(`  components: ${r.componentsExpanded} inline-expanded (fallback — see WARN above)`);
       if (r.classesMerged) console.error(`WARN: ${r.classesMerged}`);
       if (r.classesCache) console.error(`  ${r.classesCache}`);
+      if (r.classesPruned) console.error(`  ${r.classesPruned}`);
+      if (r.classesCapWarning) console.error(`WARN: ${r.classesCapWarning}`);
       r.pages.forEach((p) => console.log(`  ${p.action} "${p.title}" → id ${p.id} (/${p.slug}/)`));
       const drifted = r.pages.filter((p) => p.action === 'skipped-drifted');
       if (drifted.length) console.error(`⚠ ${drifted.length} page(s) SKIPPED (drifted — hand-edited outside exjsx): ${drifted.map((p) => `/${p.slug}/`).join(', ')}. Re-run with --force to overwrite.`);

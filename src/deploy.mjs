@@ -12,6 +12,9 @@ import { rewriteComponentIds, expandInstances, referencedComponentUids } from '.
 import { normalizeIds } from './compile.mjs';
 import { djb2 } from './classes.mjs';
 import { reinlineTree } from './inline.mjs';
+// Elementor's global-classes REST route refuses any store larger than this (MAX_ITEMS in
+// modules/global-classes/global-classes-rest-api.php).
+export const GLOBAL_CLASS_CAP = 1000;
 // Pro-only atomic types, shared with lint.mjs's OFFLINE pro-only-element warning: lint cannot know
 // the deploy target, this module can — so the hard gate lives here and the lint rule only flags risk.
 import { PRO_ONLY_TYPES } from './lint.mjs';
@@ -463,6 +466,61 @@ export async function deployBundle(bundle, cfg = {}) {
       order = [...deleted, ...bundle.classes.order];
       merged = deleted.length;
       deleted = [];
+      // THE CAP. Elementor's global-classes route hard-rejects any PUT that would leave more than
+      // MAX_ITEMS (1000) classes — `global_classes_limit_exceeded`, HTTP 400 — and the page is
+      // still CREATED, completely unstyled. A multi-project site (an agent building ten landing
+      // pages, ~90 classes each) reaches it in an afternoon, and the residents that fill it are
+      // mostly dead: every trashed or deleted page leaves its classes behind, because merge (rightly)
+      // never deletes what it cannot prove is unused. Elementor CAN prove it — the Class Manager's
+      // own usage scan (Applied_Global_Classes_Usage, every document, every status) is exposed by
+      // the companion plugin — so when the merged order would not fit, or when --prune-unused asks
+      // for it, drop the residents that scan reports as used by NOTHING. Our own ids are never
+      // candidates (they are about to be used); a usage read that fails leaves the store intact and
+      // lets the PUT fail loudly with the real error instead of guessing.
+      if (cfg.pruneUnused || order.length > GLOBAL_CLASS_CAP) {
+        try {
+          const ur = await (await fetch(`${wpUrl}/wp-json/elementor-ultra/v1/design/classes/usage`, { headers: { Authorization: auth } })).json();
+          const usage = (ur?.data || ur)?.usage;
+          if (usage && typeof usage === 'object') {
+            // The scan iterates PUBLISHED post/page/library documents only (Db::iterate_elementor_documents,
+            // post_status ['publish']), so a draft, pending, private or scheduled page is invisible to it
+            // and its classes would read as dead. Sweep every non-published Elementor document's tree
+            // through the plugin's documents routes and treat what they reference as used. (Components
+            // carry LOCAL styles — the compiler skips class dedup for them — so they need no sweep.)
+            // Any read failing aborts the prune: never guess at a store.
+            const unpublishedRefs = new Set();
+            let cursor = '';
+            do {
+              const pg = await (await fetch(`${wpUrl}/wp-json/elementor-ultra/v1/documents?status=any&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: { Authorization: auth } })).json();
+              const d = pg?.data || pg;
+              if (!Array.isArray(d?.items)) throw new Error('documents list unavailable');
+              for (const doc of d.items) {
+                if (!doc?.id || doc.status === 'publish') continue;
+                const tr = await (await fetch(`${wpUrl}/wp-json/elementor-ultra/v1/documents/${doc.id}`, { headers: { Authorization: auth } })).json();
+                const els = (tr?.data || tr)?.elements;
+                if (!Array.isArray(els)) throw new Error(`document ${doc.id} tree unavailable`);
+                const walk = (n) => { for (const c of n?.settings?.classes?.value || []) unpublishedRefs.add(c); (n?.elements || []).forEach(walk); };
+                els.forEach(walk);
+              }
+              cursor = d?.next_cursor || '';
+            } while (cursor);
+            const ours = new Set(bundle.classes.order);
+            const dead = order.filter((id) => !ours.has(id) && !(usage[id]?.total > 0) && !unpublishedRefs.has(id));
+            if (dead.length) {
+              const gone = new Set(dead);
+              order = order.filter((id) => !gone.has(id));
+              for (const id of dead) delete items[id];
+              merged -= dead.length;
+              // the route is a DIFF-PUT: an id missing from `order` is not enough, it has to be
+              // named in changes.deleted or Elementor keeps it (verified: 300 "pruned" ids, store
+              // unchanged). `deleted` was emptied by the merge above, so it is exactly the prune set.
+              deleted = dead;
+              report.classesPruned = `${dead.length} unused resident class(es) pruned (referenced by no document)`;
+            }
+            if (order.length > GLOBAL_CLASS_CAP) report.classesCapWarning = `store would hold ${order.length} classes after pruning; Elementor's cap is ${GLOBAL_CLASS_CAP} — the write will be rejected until pages are removed`;
+          }
+        } catch { /* usage unavailable — leave the store intact; the PUT reports the real error */ }
+      }
     }
     const res = await fetch(`${wpUrl}/wp-json/elementor/v1/global-classes`, {
       // X-EMCP-Allow-Mass-Delete: deploy OWNS the class namespace (orphan cleanup can legitimately

@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.2.1
+
+**Deploys no longer die at Elementor's 1000-class cap.** With merge as the default (2.2.0) nothing
+ever leaves the registry, so a site that hosts many separately-built pages fills up: the tenth
+landing page's class PUT was refused with `global_classes_limit_exceeded` (HTTP 400) and the page
+landed created but unstyled. Field data (a 50-brief agent benchmark on one site): the registry hit
+929 classes at page nine, 300 of them belonging to pages that had since been deleted, and every
+later build was forced to `--inline`. `deploy` now asks Elementor's own usage scan (the one behind
+the Class Manager's "unused" view) and, when the merged store would not fit — or on `--prune-unused`
+— drops the residents no document references, naming them in the diff-PUT's `changes.deleted`.
+The published-only scan is supplemented by a sweep of every draft/pending/private Elementor
+document, so an unpublished page's classes are never mistaken for dead; if any read fails, nothing
+is pruned and the PUT reports the real error. Own ids are never candidates. Prints
+`N unused resident class(es) pruned`, and a WARN when even a pruned store exceeds the cap.
+
+*Inline pages do keep their breakpoints.* An agent memory claimed `--inline` silently drops
+`tablet=`/`mobile=` overrides; measured on 4.2.4 they render (`local-<id>-frontend-{tablet,mobile}.css`
+carry the `@media` rules; an `h1` authored `size={124} mobile={{size:50}}` computes to 50px at
+390px). What that agent hit was the known CSS-priming flake — a 0-byte breakpoint file — which
+deploy already retries. CONVENTIONS §9 rewritten around the cap.
+
 ## 2.2.0
 
 **Two sibling pages on one site no longer destroy each other's styles.** Deploying page B to a site
